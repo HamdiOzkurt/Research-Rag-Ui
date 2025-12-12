@@ -81,10 +81,23 @@ Use this to scrape content from a specific URL.
 def get_subagents():
     """Alt ajan konfigürasyonlarını döndürür"""
     
+    # Not: Bazı versiyonlarda 'prompt', bazılarında 'system_prompt' kullanılıyor
+    # Garanti olması için ikisini de ekliyoruz
+    
     search_subagent = {
         "name": "search-agent",
         "description": "Searches the web for information using firecrawl_search tool",
         "system_prompt": """You are a search specialist. Your job is to find relevant information using firecrawl_search.
+        
+        Use the query parameter only. For specific sites, use site: operator in the query.
+        
+        Examples:
+        - firecrawl_search(query="topic keywords")
+        - firecrawl_search(query="site:reddit.com topic")
+        - firecrawl_search(query="site:github.com topic")
+        
+        Return all found URLs and key information.""",
+        "prompt": """You are a search specialist. Your job is to find relevant information using firecrawl_search.
         
         Use the query parameter only. For specific sites, use site: operator in the query.
         
@@ -106,6 +119,14 @@ def get_subagents():
         3. Evaluate source reliability
         4. Synthesize findings into clear insights
         
+        Be objective and thorough in your analysis.""",
+        "prompt": """You are an analysis specialist. Your job is to:
+        
+        1. Review all gathered information
+        2. Identify key themes and patterns
+        3. Evaluate source reliability
+        4. Synthesize findings into clear insights
+        
         Be objective and thorough in your analysis."""
     }
     
@@ -113,6 +134,18 @@ def get_subagents():
         "name": "writer-agent",
         "description": "Writes professional reports in Turkish",
         "system_prompt": """You are a professional technical writer. Your job is to:
+        
+        1. Take analyzed research data
+        2. Write a clear, well-structured report in Turkish
+        3. Include proper citations and source URLs
+        4. Use professional but accessible language
+        
+        Format:
+        - Title
+        - Executive Summary
+        - Detailed Findings
+        - Sources/References""",
+        "prompt": """You are a professional technical writer. Your job is to:
         
         1. Take analyzed research data
         2. Write a clear, well-structured report in Turkish
@@ -158,7 +191,7 @@ async def create_research_agent():
     # DeepAgent oluştur - subagents ile
     agent = create_deep_agent(
         model=model,
-        system_prompt=RESEARCH_INSTRUCTIONS,
+        instructions=RESEARCH_INSTRUCTIONS,
         tools=mcp_tools,
         subagents=get_subagents(),
     )
@@ -181,58 +214,103 @@ async def run_research(question: str, verbose: bool = True) -> str:
     
     agent = None
     mcp_client = None
+    max_retries = 3
     
-    try:
-        agent, mcp_client = await create_research_agent()
+    for attempt in range(max_retries):
+        try:
+            agent, mcp_client = await create_research_agent()
+            
+            if verbose:
+                print("🚀 Araştırma başlatılıyor...\n")
+            
+            # Agent'ı çalıştır
+            result = await agent.ainvoke({
+                "messages": [{"role": "user", "content": question}]
+            })
+            
+            # --- DEBUG LOGGING ---
+            if verbose:
+                print(f"📦 DEBUG: Result Keys: {result.keys()}")
+                if "messages" in result:
+                    print(f"📦 DEBUG: Message Count: {len(result['messages'])}")
+                    for i, m in enumerate(result['messages']):
+                        content_preview = str(m.content)[:100] if hasattr(m, 'content') else "No Content"
+                        print(f"   🔹 Msg {i}: {type(m).__name__} - {content_preview}...")
+            # ---------------------
+            
+            # Son mesajı al
+            final_response = ""
+            if "messages" in result and result["messages"]:
+                # Sondan başa doğru git, ilk mantıklı cevabı al
+                for msg in reversed(result["messages"]):
+                    if hasattr(msg, 'content') and msg.content:
+                        content = msg.content
+                        
+                        # AI Message olmalı (Human veya ToolMessage değil)
+                        if getattr(msg, 'type', '') == 'human':
+                            continue
+                            
+                        if isinstance(content, str):
+                            if content.strip():
+                                final_response = content
+                                break
+                        elif isinstance(content, list):
+                            texts = []
+                            for item in content:
+                                if isinstance(item, dict) and 'text' in item:
+                                    texts.append(item['text'])
+                                elif isinstance(item, str):
+                                    texts.append(item)
+                            
+                            joined_text = "\n".join(texts)
+                            if joined_text.strip():
+                                final_response = joined_text
+                                break
+            
+            if verbose and final_response:
+                print("\n" + "=" * 60)
+                print("📊 SONUÇ")
+                print("=" * 60)
+                print(final_response)
+            
+            if not final_response:
+                print("❌ UYARI: Mesajlardan içerik çıkarılamadı.")
+                return "❌ Araştırma yapıldı ancak yanıt oluşturulamadı. (Logları kontrol edin)"
+
+            return final_response
         
-        if verbose:
-            print("🚀 Araştırma başlatılıyor...\n")
+        except Exception as e:
+            error_msg = str(e)
+            if "429" in error_msg or "Resource exhausted" in error_msg:
+                wait_time = 20 * (attempt + 1)
+                print(f"⚠️ Rate limit aşıldı (429). {wait_time} saniye bekleniyor... ({attempt+1}/{max_retries})")
+                
+                # MCP client'ı kapat
+                if mcp_client:
+                    try:
+                        await mcp_client.close()
+                    except:
+                        pass
+                
+                await asyncio.sleep(wait_time)
+                continue
+            
+            # Diğer hatalar
+            error_msg = f"❌ Hata: {str(e)}"
+            if verbose:
+                print(error_msg)
+                import traceback
+                traceback.print_exc()
+            return error_msg
         
-        # Agent'ı çalıştır
-        result = await agent.ainvoke({
-            "messages": [{"role": "user", "content": question}]
-        })
-        
-        # Son mesajı al
-        final_response = ""
-        if "messages" in result and result["messages"]:
-            # En son mesajın içeriğini al
-            last_msg = result["messages"][-1]
-            if hasattr(last_msg, 'content'):
-                content = last_msg.content
-                if isinstance(content, str):
-                    final_response = content
-                elif isinstance(content, list):
-                    texts = []
-                    for item in content:
-                        if isinstance(item, dict) and 'text' in item:
-                            texts.append(item['text'])
-                        elif isinstance(item, str):
-                            texts.append(item)
-                    final_response = "\n".join(texts)
-        
-        if verbose and final_response:
-            print("\n" + "=" * 60)
-            print("📊 SONUÇ")
-            print("=" * 60)
-            print(final_response)
-        
-        return final_response if final_response.strip() else "❌ Boş yanıt alındı."
+        finally:
+            if mcp_client and hasattr(mcp_client, 'close'):
+                try:
+                    await mcp_client.close()
+                except:
+                    pass
     
-    except Exception as e:
-        error_msg = f"❌ Hata: {str(e)}"
-        if verbose:
-            print(error_msg)
-            import traceback
-            traceback.print_exc()
-        return error_msg
-    
-    finally:
-        if mcp_client and hasattr(mcp_client, 'close'):
-            try:
-                await mcp_client.close()
-            except:
-                pass
+    return "❌ Maksimum deneme sayısına ulaşıldı."
 
 
 def run_research_sync(question: str, verbose: bool = True) -> str:
