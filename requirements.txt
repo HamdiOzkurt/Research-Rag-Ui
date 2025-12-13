@@ -11,3 +11,5 @@ streamlit
 httpx
 nest_asyncio
 watchdog
+supabase
+tavily-python

@@ -1,9 +1,11 @@
 """
 DeepAgents Araştırma Sistemi
 Firecrawl MCP + Gemini 2.5 Flash
+FINAL WORKING VERSION
 """
 import asyncio
 import os
+import time
 from typing import Optional
 
 from deepagents import create_deep_agent
@@ -40,129 +42,75 @@ def get_llm_model():
     if provider == "ollama":
         os.environ["OLLAMA_HOST"] = settings.ollama_base_url
         
-    return init_chat_model(model_string)
+    return init_chat_model(model_string, temperature=0.3)  # Daha tutarlı sonuçlar için
 
 
 # ============ SYSTEM PROMPT ============
 
-RESEARCH_INSTRUCTIONS = """You are an expert researcher. Your job is to conduct thorough research and then write a polished report in Turkish.
+RESEARCH_INSTRUCTIONS = """You are a Turkish Research AI with multiple search tools.
 
-You have access to web search tools as your primary means of gathering information.
+YOUR TOOLS:
+- firecrawl_search(query: str) - Web scraping (Firecrawl)
+- tavily_web_search(query: str, max_results: int) - AI-optimized search (Tavily)
+- github_search_repositories(query: str) - Search GitHub repos
+- github_get_file_contents(owner: str, repo: str, path: str) - Get code files
+- firecrawl_scrape(url: str) - Get full page content
 
-## `firecrawl_search`
+MANDATORY WORKFLOW:
+1. SEARCH: Use appropriate tools based on query type
+   - General web: tavily_web_search OR firecrawl_search
+   - Code/GitHub: github_search_repositories
+   - Specific URL: firecrawl_scrape
+2. ANALYZE: Review all results
+3. WRITE: Turkish report with sources
 
-Use this to run a web search for a given query. Only use the "query" parameter.
+OUTPUT FORMAT (ALWAYS IN TURKISH):
+# [Başlık]
 
-Examples:
-- General search: firecrawl_search(query="best open source LLM models 2024")
-- Reddit search: firecrawl_search(query="site:reddit.com best LLM models")
-- GitHub search: firecrawl_search(query="site:github.com LLM benchmarks")
+## Özet
+[2-3 cümle]
 
-## `firecrawl_scrape`
+## Detaylı Bulgular
+- [Bulgu 1] [1]
+- [Bulgu 2] [2]
 
-Use this to scrape content from a specific URL.
+## Kaynaklar
+[1] URL - Açıklama
+[2] URL - Açıklama
 
-## Workflow:
+CRITICAL RULES:
+- NEVER respond without searching first
+- ALWAYS cite sources [1], [2], etc.
+- Write ONLY in Turkish
+- Use multiple tools for comprehensive research
 
-1. Plan your research approach using write_todos
-2. Conduct at least 2-3 different searches
-3. Analyze the results
-4. Write a comprehensive report in Turkish
-
-## Rules:
-- Always respond in Turkish
-- Include source URLs in your report
-- Be thorough and analytical
+EXAMPLE:
+User: "Python pandas GitHub projeleri"
+You:
+1. github_search_repositories(query="pandas python")
+2. tavily_web_search(query="pandas tutorial", max_results=3)
+3. Write Turkish report with citations
 """
 
 
-# ============ SUBAGENTS ============
-
-def get_subagents():
-    """Alt ajan konfigürasyonlarını döndürür"""
-    
-    # Not: Bazı versiyonlarda 'prompt', bazılarında 'system_prompt' kullanılıyor
-    # Garanti olması için ikisini de ekliyoruz
-    
-    search_subagent = {
-        "name": "search-agent",
-        "description": "Searches the web for information using firecrawl_search tool",
-        "system_prompt": """You are a search specialist. Your job is to find relevant information using firecrawl_search.
-        
-        Use the query parameter only. For specific sites, use site: operator in the query.
-        
-        Examples:
-        - firecrawl_search(query="topic keywords")
-        - firecrawl_search(query="site:reddit.com topic")
-        - firecrawl_search(query="site:github.com topic")
-        
-        Return all found URLs and key information.""",
-        "prompt": """You are a search specialist. Your job is to find relevant information using firecrawl_search.
-        
-        Use the query parameter only. For specific sites, use site: operator in the query.
-        
-        Examples:
-        - firecrawl_search(query="topic keywords")
-        - firecrawl_search(query="site:reddit.com topic")
-        - firecrawl_search(query="site:github.com topic")
-        
-        Return all found URLs and key information."""
-    }
-    
-    analysis_subagent = {
-        "name": "analysis-agent", 
-        "description": "Analyzes and synthesizes research findings",
-        "system_prompt": """You are an analysis specialist. Your job is to:
-        
-        1. Review all gathered information
-        2. Identify key themes and patterns
-        3. Evaluate source reliability
-        4. Synthesize findings into clear insights
-        
-        Be objective and thorough in your analysis.""",
-        "prompt": """You are an analysis specialist. Your job is to:
-        
-        1. Review all gathered information
-        2. Identify key themes and patterns
-        3. Evaluate source reliability
-        4. Synthesize findings into clear insights
-        
-        Be objective and thorough in your analysis."""
-    }
-    
-    writer_subagent = {
-        "name": "writer-agent",
-        "description": "Writes professional reports in Turkish",
-        "system_prompt": """You are a professional technical writer. Your job is to:
-        
-        1. Take analyzed research data
-        2. Write a clear, well-structured report in Turkish
-        3. Include proper citations and source URLs
-        4. Use professional but accessible language
-        
-        Format:
-        - Title
-        - Executive Summary
-        - Detailed Findings
-        - Sources/References""",
-        "prompt": """You are a professional technical writer. Your job is to:
-        
-        1. Take analyzed research data
-        2. Write a clear, well-structured report in Turkish
-        3. Include proper citations and source URLs
-        4. Use professional but accessible language
-        
-        Format:
-        - Title
-        - Executive Summary
-        - Detailed Findings
-        - Sources/References"""
-    }
-    
-    return [search_subagent, analysis_subagent, writer_subagent]
-
-
 # ============ AGENT OLUŞTURMA ============
+
+def sanitize_tool_schema(tool):
+    """MCP tool schema'larını Gemini uyumlu hale getirir"""
+    if hasattr(tool, 'args_schema') and tool.args_schema:
+        schema = tool.args_schema
+        if hasattr(schema, 'schema'):
+            schema_dict = schema.schema()
+            # Gemini ile uyumsuz alanları kaldır
+            schema_dict.pop('$schema', None)
+            schema_dict.pop('additionalProperties', None)
+            if 'properties' in schema_dict:
+                for prop in schema_dict['properties'].values():
+                    if isinstance(prop, dict):
+                        prop.pop('$schema', None)
+                        prop.pop('additionalProperties', None)
+    return tool
+
 
 async def create_research_agent():
     """Firecrawl MCP + DeepAgent oluşturur"""
@@ -170,30 +118,60 @@ async def create_research_agent():
     setup_langsmith()
     
     if not settings.firecrawl_api_key:
-        raise ValueError("❌ FIRECRAWL_API_KEY gerekli!")
+        raise ValueError("❌ FIRECRAWL_API_KEY gerekli! .env dosyasını kontrol edin.")
     
-    print("\n🔌 Firecrawl MCP bağlanıyor...")
+    print("\n🔌 MCP Servers bağlanıyor...")
     
-    mcp_client = MultiServerMCPClient({
+    # MCP Client yapılandırması - Firecrawl + Tavily + GitHub
+    mcp_servers = {
         "firecrawl": {
             "command": settings.firecrawl_mcp_command,
             "args": settings.firecrawl_mcp_args,
             "env": settings.get_firecrawl_env(),
             "transport": "stdio"
         }
-    })
+    }
     
+    # Tavily MCP ekle (eğer API key varsa)
+    if hasattr(settings, 'tavily_api_key') and settings.tavily_api_key:
+        mcp_servers["tavily"] = {
+            "command": "npx",
+            "args": ["-y", "@tavily/mcp-server"],
+            "env": {"TAVILY_API_KEY": settings.tavily_api_key},
+            "transport": "stdio"
+        }
+    
+    # GitHub MCP ekle (eğer token varsa)
+    if hasattr(settings, 'github_token') and settings.github_token:
+        mcp_servers["github"] = {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-github"],
+            "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": settings.github_token},
+            "transport": "stdio"
+        }
+    
+    mcp_client = MultiServerMCPClient(mcp_servers)
+    
+    # Tool'ları yükle
     mcp_tools = await mcp_client.get_tools()
-    print(f"✅ {len(mcp_tools)} Firecrawl tool yüklendi")
+    print(f"✅ {len(mcp_tools)} MCP tool yüklendi")
     
+    # Tool isimlerini göster
+    if mcp_tools:
+        print(f"   📋 Tools: {', '.join([t.name for t in mcp_tools])}")
+    
+    # Tool schema'larını Gemini uyumlu hale getir
+    for tool in mcp_tools:
+        sanitize_tool_schema(tool)
+    
+    # LLM modelini al
     model = get_llm_model()
     
-    # DeepAgent oluştur - subagents ile
+    # DeepAgent oluştur
     agent = create_deep_agent(
         model=model,
         instructions=RESEARCH_INSTRUCTIONS,
-        tools=mcp_tools,
-        subagents=get_subagents(),
+        tools=mcp_tools,  # Firecrawl + Tavily + GitHub MCP tools
     )
     
     print("✅ DeepAgent hazır!\n")
@@ -206,10 +184,10 @@ async def run_research(question: str, verbose: bool = True) -> str:
     """Araştırma agent'ını çalıştırır"""
     
     if verbose:
-        print("\n" + "=" * 60)
+        print("\n" + "=" * 70)
         print("🔬 DeepAgents Araştırma Sistemi")
-        print("   (Gemini + Firecrawl MCP)")
-        print("=" * 60)
+        print("   Gemini 2.5 Flash + Firecrawl MCP")
+        print("=" * 70)
         print(f"\n📝 Soru: {question}\n")
     
     agent = None
@@ -218,10 +196,17 @@ async def run_research(question: str, verbose: bool = True) -> str:
     
     for attempt in range(max_retries):
         try:
+            # Agent'ı oluştur
             agent, mcp_client = await create_research_agent()
             
             if verbose:
                 print("🚀 Araştırma başlatılıyor...\n")
+            
+            # Rate limit için başlangıç bekleme
+            if attempt > 0:
+                wait = 10 * attempt
+                print(f"⏳ {wait} saniye bekleniyor (rate limit)...")
+                await asyncio.sleep(wait)
             
             # Agent'ı çalıştır
             result = await agent.ainvoke({
@@ -230,60 +215,96 @@ async def run_research(question: str, verbose: bool = True) -> str:
             
             # --- DEBUG LOGGING ---
             if verbose:
-                print(f"📦 DEBUG: Result Keys: {result.keys()}")
+                print(f"\n📦 DEBUG INFO:")
+                print(f"   Result Keys: {list(result.keys())}")
+                
                 if "messages" in result:
-                    print(f"📦 DEBUG: Message Count: {len(result['messages'])}")
-                    for i, m in enumerate(result['messages']):
-                        content_preview = str(m.content)[:100] if hasattr(m, 'content') else "No Content"
-                        print(f"   🔹 Msg {i}: {type(m).__name__} - {content_preview}...")
-            # ---------------------
-            
-            # Son mesajı al
-            final_response = ""
-            if "messages" in result and result["messages"]:
-                # Sondan başa doğru git, ilk mantıklı cevabı al
-                for msg in reversed(result["messages"]):
-                    if hasattr(msg, 'content') and msg.content:
-                        content = msg.content
+                    print(f"   Message Count: {len(result['messages'])}")
+                    
+                    # Her mesajı incele
+                    for i, msg in enumerate(result['messages']):
+                        msg_type = type(msg).__name__
+                        print(f"\n   🔹 Message {i}: {msg_type}")
                         
-                        # AI Message olmalı (Human veya ToolMessage değil)
-                        if getattr(msg, 'type', '') == 'human':
-                            continue
-                            
-                        if isinstance(content, str):
-                            if content.strip():
-                                final_response = content
-                                break
-                        elif isinstance(content, list):
-                            texts = []
-                            for item in content:
-                                if isinstance(item, dict) and 'text' in item:
-                                    texts.append(item['text'])
-                                elif isinstance(item, str):
-                                    texts.append(item)
-                            
-                            joined_text = "\n".join(texts)
-                            if joined_text.strip():
-                                final_response = joined_text
-                                break
+                        # Content
+                        if hasattr(msg, 'content'):
+                            content = msg.content
+                            content_preview = str(content)[:200]
+                            print(f"      Content: {content_preview}...")
+                        
+                        # Tool calls
+                        if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                            print(f"      🔧 Tool Calls: {len(msg.tool_calls)}")
+                            for tc in msg.tool_calls:
+                                print(f"         - {tc.get('name', 'unknown')}({list(tc.get('args', {}).keys())})")
+                        
+                        # Tool results
+                        if hasattr(msg, 'name'):
+                            print(f"      Tool Result from: {msg.name}")
             
+            print("\n" + "-" * 70)
+            
+            # Son AI mesajını bul ve döndür
+            final_response = ""
+            
+            if "messages" in result and result["messages"]:
+                # Sondan başa doğru git
+                for msg in reversed(result["messages"]):
+                    # Sadece AI mesajlarını al
+                    if type(msg).__name__ not in ['AIMessage', 'AIMessageChunk']:
+                        continue
+                    
+                    if not hasattr(msg, 'content'):
+                        continue
+                    
+                    content = msg.content
+                    
+                    # Tool call yapıyorsa geç (henüz yanıt hazır değil)
+                    if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                        continue
+                    
+                    # String ise direkt al
+                    if isinstance(content, str) and content.strip():
+                        final_response = content.strip()
+                        break
+                    
+                    # List ise text parçalarını birleştir
+                    elif isinstance(content, list):
+                        texts = []
+                        for item in content:
+                            if isinstance(item, dict) and 'text' in item:
+                                texts.append(item['text'])
+                            elif isinstance(item, str):
+                                texts.append(item)
+                        
+                        combined = "\n".join(texts).strip()
+                        if combined:
+                            final_response = combined
+                            break
+            
+            # Sonucu göster
             if verbose and final_response:
-                print("\n" + "=" * 60)
+                print("\n" + "=" * 70)
                 print("📊 SONUÇ")
-                print("=" * 60)
+                print("=" * 70 + "\n")
                 print(final_response)
+                print("\n" + "=" * 70)
             
             if not final_response:
-                print("❌ UYARI: Mesajlardan içerik çıkarılamadı.")
-                return "❌ Araştırma yapıldı ancak yanıt oluşturulamadı. (Logları kontrol edin)"
-
+                print("\n❌ UYARI: Agent yanıt üretti ama içerik bulunamadı!")
+                print("   Yukarıdaki debug loglarını kontrol edin.")
+                return "❌ Araştırma tamamlandı ama yanıt formatlanamadı. Debug loglarına bakın."
+            
             return final_response
         
         except Exception as e:
             error_msg = str(e)
-            if "429" in error_msg or "Resource exhausted" in error_msg:
-                wait_time = 20 * (attempt + 1)
-                print(f"⚠️ Rate limit aşıldı (429). {wait_time} saniye bekleniyor... ({attempt+1}/{max_retries})")
+            
+            # Rate limit hatası
+            if "429" in error_msg or "Resource exhausted" in error_msg or "quota" in error_msg.lower():
+                wait_time = 30 * (attempt + 1)
+                print(f"\n⚠️ Rate limit aşıldı (429 Error)")
+                print(f"   {wait_time} saniye bekleniyor... (Deneme {attempt+1}/{max_retries})")
                 
                 # MCP client'ı kapat
                 if mcp_client:
@@ -298,29 +319,41 @@ async def run_research(question: str, verbose: bool = True) -> str:
             # Diğer hatalar
             error_msg = f"❌ Hata: {str(e)}"
             if verbose:
-                print(error_msg)
+                print(f"\n{error_msg}")
                 import traceback
                 traceback.print_exc()
+            
             return error_msg
         
         finally:
+            # MCP client'ı her durumda kapat
             if mcp_client and hasattr(mcp_client, 'close'):
                 try:
                     await mcp_client.close()
-                except:
-                    pass
+                except Exception as close_error:
+                    if verbose:
+                        print(f"⚠️ MCP client kapatma hatası: {close_error}")
     
-    return "❌ Maksimum deneme sayısına ulaşıldı."
+    return "❌ Maksimum deneme sayısına ulaşıldı. Lütfen birkaç dakika sonra tekrar deneyin."
 
 
 def run_research_sync(question: str, verbose: bool = True) -> str:
-    """Senkron wrapper"""
+    """Senkron wrapper - CLI için"""
     return asyncio.run(run_research(question, verbose))
 
 
+# ============ İNTERAKTİF MOD ============
+
 async def interactive_mode():
-    """İnteraktif mod"""
-    print("\n🔬 İnteraktif Mod - Çıkmak için 'q'\n")
+    """İnteraktif mod - Terminal'den sürekli soru sorabilirsiniz"""
+    print("\n" + "=" * 70)
+    print("🔬 İnteraktif Araştırma Modu")
+    print("=" * 70)
+    print("\nKomutlar:")
+    print("  - Soru yazın ve Enter'a basın")
+    print("  - 'q' veya 'quit' -> Çıkış")
+    print("  - 'clear' -> Ekranı temizle")
+    print("\n" + "=" * 70 + "\n")
     
     while True:
         try:
@@ -330,13 +363,22 @@ async def interactive_mode():
                 print("\n👋 Görüşmek üzere!")
                 break
             
+            if question.lower() == 'clear':
+                os.system('cls' if os.name == 'nt' else 'clear')
+                continue
+            
             if not question:
                 continue
             
-            result = await run_research(question)
-            print(f"\n{result}\n")
-            print("-" * 60)
+            # Araştırmayı çalıştır
+            result = await run_research(question, verbose=True)
+            
+            print("\n" + "-" * 70 + "\n")
             
         except KeyboardInterrupt:
             print("\n\n👋 Görüşmek üzere!")
             break
+        except Exception as e:
+            print(f"\n❌ Beklenmeyen hata: {e}")
+            import traceback
+            traceback.print_exc()

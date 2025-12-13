@@ -31,6 +31,15 @@ class Settings(BaseModel):
     # Firecrawl (web scraping)
     firecrawl_api_key: Optional[str] = Field(default_factory=lambda: os.getenv("FIRECRAWL_API_KEY"))
     
+    # Tavily (web search)
+    tavily_api_key: Optional[str] = Field(default_factory=lambda: os.getenv("TAVILY_API_KEY"))
+    
+    # ============ Database ============
+    
+    # Supabase (conversation memory)
+    supabase_url: Optional[str] = Field(default_factory=lambda: os.getenv("SUPABASE_URL"))
+    supabase_key: Optional[str] = Field(default_factory=lambda: os.getenv("SUPABASE_KEY"))
+    
     # ============ İzleme ============
     
     # LangSmith
