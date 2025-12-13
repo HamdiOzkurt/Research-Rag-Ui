@@ -12,7 +12,7 @@ import sys
 import asyncio
 
 from .config import settings
-from .agents import run_research, interactive_mode
+from .agents import run_simple_research, interactive_mode
 
 
 def print_banner():
@@ -82,8 +82,8 @@ async def main_async(question: str = None):
         await interactive_mode()
         return
     
-    # Tek soru modu
-    result = await run_research(question, verbose=True)
+    # Tek soru modu - Rate limit dostu
+    result = await run_simple_research(question, verbose=True)
     print(f"\n{result}")
 
 

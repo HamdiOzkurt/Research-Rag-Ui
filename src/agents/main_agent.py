@@ -47,49 +47,163 @@ def get_llm_model():
 
 # ============ SYSTEM PROMPT ============
 
-RESEARCH_INSTRUCTIONS = """You are a Turkish Research AI with multiple search tools.
+RESEARCH_INSTRUCTIONS = """You are an expert Turkish Research AI that creates professional, comprehensive reports.
 
-YOUR TOOLS:
-- firecrawl_search(query: str) - Web scraping (Firecrawl)
-- tavily_web_search(query: str, max_results: int) - AI-optimized search (Tavily)
-- github_search_repositories(query: str) - Search GitHub repos
-- github_get_file_contents(owner: str, repo: str, path: str) - Get code files
-- firecrawl_scrape(url: str) - Get full page content
+🎯 YOUR MISSION:
+1. SEARCH once using the best tool
+2. CREATE a detailed, professional Turkish report
+3. STOP immediately
 
-MANDATORY WORKFLOW:
-1. SEARCH: Use appropriate tools based on query type
-   - General web: tavily_web_search OR firecrawl_search
-   - Code/GitHub: github_search_repositories
-   - Specific URL: firecrawl_scrape
-2. ANALYZE: Review all results
-3. WRITE: Turkish report with sources
+🛠️ AVAILABLE TOOLS:
+- firecrawl_search(query) - Deep web scraping
+- tavily-search(query, max_results) - AI-powered search
+- github_search_repositories(query) - Find code repositories
+- firecrawl_scrape(url) - Extract full page content
 
-OUTPUT FORMAT (ALWAYS IN TURKISH):
-# [Başlık]
+📋 PROFESSIONAL REPORT FORMAT (ALWAYS IN TURKISH):
 
-## Özet
-[2-3 cümle]
+# 📊 [Başlık - Açıklayıcı ve Profesyonel]
 
-## Detaylı Bulgular
-- [Bulgu 1] [1]
-- [Bulgu 2] [2]
+---
 
-## Kaynaklar
-[1] URL - Açıklama
-[2] URL - Açıklama
+## 🎯 Özet
+[2-3 cümle ile konunun özü. Net, anlaşılır ve ilgi çekici yazın.]
 
-CRITICAL RULES:
-- NEVER respond without searching first
-- ALWAYS cite sources [1], [2], etc.
-- Write ONLY in Turkish
-- Use multiple tools for comprehensive research
+---
 
-EXAMPLE:
-User: "Python pandas GitHub projeleri"
-You:
-1. github_search_repositories(query="pandas python")
-2. tavily_web_search(query="pandas tutorial", max_results=3)
-3. Write Turkish report with citations
+## 📖 Detaylı Açıklama
+
+### 🔍 Nedir?
+[İlk paragraf: Konunun tanımı, ne olduğu, temel özellikleri]
+
+### 💡 Nasıl Çalışır?
+[İkinci paragraf: Çalışma prensibi, arkasındaki mantık]
+
+### ⚡ Neden Önemli?
+[Üçüncü paragraf: Avantajları, kullanım nedenleri, faydaları]
+
+---
+
+## 💻 Kod Örnekleri
+
+### Örnek 1: Temel Kullanım
+```python
+# Basit ve anlaşılır örnek
+# Her satırı açıklayın
+
+# Örnek kod buraya
+```
+**Açıklama:** [Bu kodun ne yaptığını açıklayın]
+
+### Örnek 2: Gelişmiş Kullanım
+```python
+# Daha karmaşık, gerçek dünya örneği
+# Pratik bir senaryo gösterin
+
+# Örnek kod buraya
+```
+**Açıklama:** [Bu kodun ne yaptığını açıklayın]
+
+### Örnek 3: Best Practices
+```python
+# En iyi uygulamalar
+# Profesyonel kullanım
+
+# Örnek kod buraya
+```
+**Açıklama:** [Bu kodun ne yaptığını açıklayın]
+
+---
+
+## 🎯 Kullanım Alanları
+
+| Alan | Açıklama |
+|------|----------|
+| 🔹 **[Alan 1]** | [Kısa açıklama] |
+| 🔹 **[Alan 2]** | [Kısa açıklama] |
+| 🔹 **[Alan 3]** | [Kısa açıklama] |
+
+---
+
+## ✅ Avantajlar & ❌ Dezavantajlar
+
+### ✅ Avantajlar:
+- ✓ [Avantaj 1]
+- ✓ [Avantaj 2]
+- ✓ [Avantaj 3]
+
+### ❌ Dezavantajlar:
+- ✗ [Dezavantaj 1]
+- ✗ [Dezavantaj 2]
+
+---
+
+## 🚀 Hızlı Başlangıç
+
+1. **Kurulum:**
+   ```bash
+   # Kurulum komutu
+   ```
+
+2. **İlk Adımlar:**
+   - [Adım 1]
+   - [Adım 2]
+   - [Adım 3]
+
+---
+
+## 📚 Kaynaklar
+
+1. 🔗 [Kaynak Başlığı](URL) - Kısa açıklama
+2. 🔗 [Kaynak Başlığı](URL) - Kısa açıklama
+3. 🔗 [Kaynak Başlığı](URL) - Kısa açıklama
+
+---
+
+## 💡 İpuçları & Notlar
+
+> **💡 İpucu:** [Önemli bir ipucu]
+
+> **⚠️ Dikkat:** [Uyarı veya önemli not]
+
+> **🎓 Öğrenme Kaynağı:** [Ek öğrenme materyali]
+
+---
+
+**📅 Rapor Tarihi:** {bugünün tarihi}  
+**🔍 Arama Kaynağı:** [Kullanılan tool]
+
+---
+
+🎯 CRITICAL RULES:
+- Search ONLY ONCE with the most relevant tool
+- ALWAYS include minimum 3 code examples with explanations
+- Write minimum 3 detailed paragraphs in "Detaylı Açıklama"
+- Use emojis for better readability (📊 🎯 💻 ✅ etc.)
+- Include tables, lists, and formatted sections
+- Add practical tips and warnings
+- STOP immediately after writing the report
+- Write EVERYTHING in Turkish (except code)
+
+📝 EXAMPLE QUERY: "Python pandas nedir?"
+✅ YOU SHOULD:
+1. tavily-search(query="Python pandas tutorial examples best practices", max_results=5)
+2. Write comprehensive report with:
+   - Professional title with emoji
+   - 3+ detailed paragraphs
+   - 3 code examples with explanations
+   - Use cases table
+   - Pros & cons
+   - Quick start guide
+   - Multiple sources
+   - Tips & warnings
+3. STOP
+
+❌ NEVER:
+- Search more than once
+- Write short, incomplete reports
+- Skip code examples
+- Write in English (except code comments)
 """
 
 
@@ -122,43 +236,87 @@ async def create_research_agent():
     
     print("\n🔌 MCP Servers bağlanıyor...")
     
-    # MCP Client yapılandırması - Firecrawl + Tavily + GitHub
-    mcp_servers = {
-        "firecrawl": {
-            "command": settings.firecrawl_mcp_command,
-            "args": settings.firecrawl_mcp_args,
-            "env": settings.get_firecrawl_env(),
-            "transport": "stdio"
-        }
-    }
+    # Her MCP'yi ayrı ayrı test et
+    working_servers = {}
     
-    # Tavily MCP ekle (eğer API key varsa)
+    # 1. Firecrawl (zorunlu)
+    print("   🔥 Firecrawl test ediliyor...")
+    try:
+        test_client = MultiServerMCPClient({
+            "firecrawl": {
+                "command": settings.firecrawl_mcp_command,
+                "args": settings.firecrawl_mcp_args,
+                "env": settings.get_firecrawl_env(),
+                "transport": "stdio"
+            }
+        })
+        test_tools = await test_client.get_tools()
+        if test_tools:
+            working_servers["firecrawl"] = {
+                "command": settings.firecrawl_mcp_command,
+                "args": settings.firecrawl_mcp_args,
+                "env": settings.get_firecrawl_env(),
+                "transport": "stdio"
+            }
+            print(f"      ✅ Firecrawl OK ({len(test_tools)} tools)")
+    except Exception as e:
+        print(f"      ❌ Firecrawl başarısız: {str(e)[:100]}")
+        raise ValueError("Firecrawl MCP zorunlu ama başlatılamadı!")
+    
+    # 2. Tavily (opsiyonel)
     if hasattr(settings, 'tavily_api_key') and settings.tavily_api_key:
-        mcp_servers["tavily"] = {
-            "command": "npx",
-            "args": ["-y", "@tavily/mcp-server"],
-            "env": {"TAVILY_API_KEY": settings.tavily_api_key},
-            "transport": "stdio"
-        }
+        print("   🔍 Tavily test ediliyor...")
+        try:
+            test_client = MultiServerMCPClient({
+                "tavily": {
+                    "command": "npx",
+                    "args": ["-y", "tavily-mcp@latest"],
+                    "env": {"TAVILY_API_KEY": settings.tavily_api_key},
+                    "transport": "stdio"
+                }
+            })
+            test_tools = await test_client.get_tools()
+            if test_tools:
+                working_servers["tavily"] = {
+                    "command": "npx",
+                    "args": ["-y", "tavily-mcp@latest"],
+                    "env": {"TAVILY_API_KEY": settings.tavily_api_key},
+                    "transport": "stdio"
+                }
+                print(f"      ✅ Tavily OK ({len(test_tools)} tools)")
+        except Exception as e:
+            print(f"      ⚠️ Tavily atlandı: {str(e)[:100]}")
     
-    # GitHub MCP ekle (eğer token varsa)
+    # 3. GitHub (opsiyonel) - Community package via npx
+    # Not: GitHub'ın resmi MCP'si Docker gerektirir, bu yüzden community versiyonunu kullanıyoruz
     if hasattr(settings, 'github_token') and settings.github_token:
-        mcp_servers["github"] = {
-            "command": "npx",
-            "args": ["-y", "@modelcontextprotocol/server-github"],
-            "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": settings.github_token},
-            "transport": "stdio"
-        }
+        print("   💻 GitHub test ediliyor...")
+        try:
+            test_client = MultiServerMCPClient({
+                "github": {
+                    "command": "npx",
+                    "args": ["-y", "@modelcontextprotocol/server-github"],
+                    "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": settings.github_token},
+                    "transport": "stdio"
+                }
+            })
+            test_tools = await test_client.get_tools()
+            if test_tools:
+                working_servers["github"] = {
+                    "command": "npx",
+                    "args": ["-y", "@modelcontextprotocol/server-github"],
+                    "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": settings.github_token},
+                    "transport": "stdio"
+                }
+                print(f"      ✅ GitHub OK ({len(test_tools)} tools)")
+        except Exception as e:
+            print(f"      ⚠️ GitHub atlandı: {str(e)[:100]}")
     
-    mcp_client = MultiServerMCPClient(mcp_servers)
-    
-    # Tool'ları yükle
+    # Final MCP client - sadece çalışan serverlarla
+    print(f"\n✅ {len(working_servers)} MCP server aktif: {', '.join(working_servers.keys())}")
+    mcp_client = MultiServerMCPClient(working_servers)
     mcp_tools = await mcp_client.get_tools()
-    print(f"✅ {len(mcp_tools)} MCP tool yüklendi")
-    
-    # Tool isimlerini göster
-    if mcp_tools:
-        print(f"   📋 Tools: {', '.join([t.name for t in mcp_tools])}")
+    print(f"   📋 Toplam {len(mcp_tools)} tool yüklendi")
     
     # Tool schema'larını Gemini uyumlu hale getir
     for tool in mcp_tools:
@@ -167,11 +325,13 @@ async def create_research_agent():
     # LLM modelini al
     model = get_llm_model()
     
+    print("🤖 Model:", model.model_name if hasattr(model, 'model_name') else "Unknown")
+    
     # DeepAgent oluştur
     agent = create_deep_agent(
         model=model,
         instructions=RESEARCH_INSTRUCTIONS,
-        tools=mcp_tools,  # Firecrawl + Tavily + GitHub MCP tools
+        tools=mcp_tools,
     )
     
     print("✅ DeepAgent hazır!\n")
@@ -208,10 +368,11 @@ async def run_research(question: str, verbose: bool = True) -> str:
                 print(f"⏳ {wait} saniye bekleniyor (rate limit)...")
                 await asyncio.sleep(wait)
             
-            # Agent'ı çalıştır
-            result = await agent.ainvoke({
-                "messages": [{"role": "user", "content": question}]
-            })
+            # Agent'ı çalıştır (recursion_limit ile sonsuz döngüyü engelle)
+            result = await agent.ainvoke(
+                {"messages": [{"role": "user", "content": question}]},
+                config={"recursion_limit": 15}  # Artırıldı: 10 → 15
+            )
             
             # --- DEBUG LOGGING ---
             if verbose:
@@ -259,10 +420,6 @@ async def run_research(question: str, verbose: bool = True) -> str:
                     
                     content = msg.content
                     
-                    # Tool call yapıyorsa geç (henüz yanıt hazır değil)
-                    if hasattr(msg, 'tool_calls') and msg.tool_calls:
-                        continue
-                    
                     # String ise direkt al
                     if isinstance(content, str) and content.strip():
                         final_response = content.strip()
@@ -276,6 +433,10 @@ async def run_research(question: str, verbose: bool = True) -> str:
                                 texts.append(item['text'])
                             elif isinstance(item, str):
                                 texts.append(item)
+                        
+                        if texts:
+                            final_response = ' '.join(texts).strip()
+                            break
                         
                         combined = "\n".join(texts).strip()
                         if combined:

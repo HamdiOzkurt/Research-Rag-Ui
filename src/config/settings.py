@@ -47,9 +47,9 @@ class Settings(BaseModel):
     
     # ============ Model Seçimi ============
     
-    # Varsayılan: Gemini 2.5 Flash
+    # Varsayılan: Gemini 2.0 Flash Experimental (daha yüksek limit)
     default_model: str = Field(
-        default_factory=lambda: os.getenv("DEFAULT_MODEL", "google_genai:gemini-2.5-flash-preview-05-20")
+        default_factory=lambda: os.getenv("DEFAULT_MODEL", "google_genai:gemini-2.0-flash-exp")
     )
     
     # İkincil model (Ollama local)
