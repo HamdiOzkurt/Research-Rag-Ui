@@ -23,7 +23,7 @@ def setup_langsmith():
     os.environ.setdefault("LANGCHAIN_PROJECT", "multi-agent-search")
     if settings.langsmith_api_key:
         os.environ["LANGCHAIN_API_KEY"] = settings.langsmith_api_key
-        print("✅ LangSmith tracing aktif!")
+        print("[OK] LangSmith tracing aktif!")
         print("   📊 https://smith.langchain.com")
         return True
     return False
@@ -35,7 +35,7 @@ def get_llm_model():
     """Kullanılabilir LLM modelini döndürür"""
     model_string = settings.get_available_model()
     provider, model_name = settings.get_model_provider(model_string)
-    print(f"🤖 Model: {provider}:{model_name}")
+    print(f"[MODEL] Model: {provider}:{model_name}")
     
     if provider == "google_genai" and settings.google_api_key:
         os.environ["GOOGLE_API_KEY"] = settings.google_api_key
@@ -73,7 +73,7 @@ RESEARCH_INSTRUCTIONS = """You are an expert Turkish Research AI that creates pr
 
 ## 📖 Detaylı Açıklama
 
-### 🔍 Nedir?
+### [SEARCH] Nedir?
 [İlk paragraf: Konunun tanımı, ne olduğu, temel özellikleri]
 
 ### 💡 Nasıl Çalışır?
@@ -125,20 +125,20 @@ RESEARCH_INSTRUCTIONS = """You are an expert Turkish Research AI that creates pr
 
 ---
 
-## ✅ Avantajlar & ❌ Dezavantajlar
+## [OK] Avantajlar & [ERROR] Dezavantajlar
 
-### ✅ Avantajlar:
+### [OK] Avantajlar:
 - ✓ [Avantaj 1]
 - ✓ [Avantaj 2]
 - ✓ [Avantaj 3]
 
-### ❌ Dezavantajlar:
+### [ERROR] Dezavantajlar:
 - ✗ [Dezavantaj 1]
 - ✗ [Dezavantaj 2]
 
 ---
 
-## 🚀 Hızlı Başlangıç
+## [START] Hızlı Başlangıç
 
 1. **Kurulum:**
    ```bash
@@ -164,14 +164,14 @@ RESEARCH_INSTRUCTIONS = """You are an expert Turkish Research AI that creates pr
 
 > **💡 İpucu:** [Önemli bir ipucu]
 
-> **⚠️ Dikkat:** [Uyarı veya önemli not]
+> **[WARN] Dikkat:** [Uyarı veya önemli not]
 
 > **🎓 Öğrenme Kaynağı:** [Ek öğrenme materyali]
 
 ---
 
 **📅 Rapor Tarihi:** {bugünün tarihi}  
-**🔍 Arama Kaynağı:** [Kullanılan tool]
+**[SEARCH] Arama Kaynağı:** [Kullanılan tool]
 
 ---
 
@@ -179,14 +179,14 @@ RESEARCH_INSTRUCTIONS = """You are an expert Turkish Research AI that creates pr
 - Search ONLY ONCE with the most relevant tool
 - ALWAYS include minimum 3 code examples with explanations
 - Write minimum 3 detailed paragraphs in "Detaylı Açıklama"
-- Use emojis for better readability (📊 🎯 💻 ✅ etc.)
+- Use emojis for better readability (📊 🎯 💻 [OK] etc.)
 - Include tables, lists, and formatted sections
 - Add practical tips and warnings
 - STOP immediately after writing the report
 - Write EVERYTHING in Turkish (except code)
 
 📝 EXAMPLE QUERY: "Python pandas nedir?"
-✅ YOU SHOULD:
+[OK] YOU SHOULD:
 1. tavily-search(query="Python pandas tutorial examples best practices", max_results=5)
 2. Write comprehensive report with:
    - Professional title with emoji
@@ -199,7 +199,7 @@ RESEARCH_INSTRUCTIONS = """You are an expert Turkish Research AI that creates pr
    - Tips & warnings
 3. STOP
 
-❌ NEVER:
+[ERROR] NEVER:
 - Search more than once
 - Write short, incomplete reports
 - Skip code examples
@@ -232,7 +232,7 @@ async def create_research_agent():
     setup_langsmith()
     
     if not settings.firecrawl_api_key:
-        raise ValueError("❌ FIRECRAWL_API_KEY gerekli! .env dosyasını kontrol edin.")
+        raise ValueError("[ERROR] FIRECRAWL_API_KEY gerekli! .env dosyasını kontrol edin.")
     
     print("\n🔌 MCP Servers bağlanıyor...")
     
@@ -258,14 +258,14 @@ async def create_research_agent():
                 "env": settings.get_firecrawl_env(),
                 "transport": "stdio"
             }
-            print(f"      ✅ Firecrawl OK ({len(test_tools)} tools)")
+            print(f"      [OK] Firecrawl OK ({len(test_tools)} tools)")
     except Exception as e:
-        print(f"      ❌ Firecrawl başarısız: {str(e)[:100]}")
+        print(f"      [ERROR] Firecrawl başarısız: {str(e)[:100]}")
         raise ValueError("Firecrawl MCP zorunlu ama başlatılamadı!")
     
     # 2. Tavily (opsiyonel)
     if hasattr(settings, 'tavily_api_key') and settings.tavily_api_key:
-        print("   🔍 Tavily test ediliyor...")
+        print("   [SEARCH] Tavily test ediliyor...")
         try:
             test_client = MultiServerMCPClient({
                 "tavily": {
@@ -283,9 +283,9 @@ async def create_research_agent():
                     "env": {"TAVILY_API_KEY": settings.tavily_api_key},
                     "transport": "stdio"
                 }
-                print(f"      ✅ Tavily OK ({len(test_tools)} tools)")
+                print(f"      [OK] Tavily OK ({len(test_tools)} tools)")
         except Exception as e:
-            print(f"      ⚠️ Tavily atlandı: {str(e)[:100]}")
+            print(f"      [WARN] Tavily atlandı: {str(e)[:100]}")
     
     # 3. GitHub (opsiyonel) - Community package via npx
     # Not: GitHub'ın resmi MCP'si Docker gerektirir, bu yüzden community versiyonunu kullanıyoruz
@@ -308,12 +308,12 @@ async def create_research_agent():
                     "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": settings.github_token},
                     "transport": "stdio"
                 }
-                print(f"      ✅ GitHub OK ({len(test_tools)} tools)")
+                print(f"      [OK] GitHub OK ({len(test_tools)} tools)")
         except Exception as e:
-            print(f"      ⚠️ GitHub atlandı: {str(e)[:100]}")
+            print(f"      [WARN] GitHub atlandı: {str(e)[:100]}")
     
     # Final MCP client - sadece çalışan serverlarla
-    print(f"\n✅ {len(working_servers)} MCP server aktif: {', '.join(working_servers.keys())}")
+    print(f"\n[OK] {len(working_servers)} MCP server aktif: {', '.join(working_servers.keys())}")
     mcp_client = MultiServerMCPClient(working_servers)
     mcp_tools = await mcp_client.get_tools()
     print(f"   📋 Toplam {len(mcp_tools)} tool yüklendi")
@@ -325,16 +325,17 @@ async def create_research_agent():
     # LLM modelini al
     model = get_llm_model()
     
-    print("🤖 Model:", model.model_name if hasattr(model, 'model_name') else "Unknown")
+    print("[MODEL] Model:", model.model_name if hasattr(model, 'model_name') else "Unknown")
     
     # DeepAgent oluştur
+    # deepagents venv sürümü: `system_prompt` kullanır (instructions değil)
     agent = create_deep_agent(
         model=model,
-        instructions=RESEARCH_INSTRUCTIONS,
         tools=mcp_tools,
+        system_prompt=RESEARCH_INSTRUCTIONS,
     )
     
-    print("✅ DeepAgent hazır!\n")
+    print("[OK] DeepAgent hazır!\n")
     return agent, mcp_client
 
 
@@ -360,7 +361,7 @@ async def run_research(question: str, verbose: bool = True) -> str:
             agent, mcp_client = await create_research_agent()
             
             if verbose:
-                print("🚀 Araştırma başlatılıyor...\n")
+                print("[START] Araştırma başlatılıyor...\n")
             
             # Rate limit için başlangıç bekleme
             if attempt > 0:
@@ -452,9 +453,9 @@ async def run_research(question: str, verbose: bool = True) -> str:
                 print("\n" + "=" * 70)
             
             if not final_response:
-                print("\n❌ UYARI: Agent yanıt üretti ama içerik bulunamadı!")
+                print("\n[ERROR] UYARI: Agent yanıt üretti ama içerik bulunamadı!")
                 print("   Yukarıdaki debug loglarını kontrol edin.")
-                return "❌ Araştırma tamamlandı ama yanıt formatlanamadı. Debug loglarına bakın."
+                return "[ERROR] Araştırma tamamlandı ama yanıt formatlanamadı. Debug loglarına bakın."
             
             return final_response
         
@@ -464,21 +465,24 @@ async def run_research(question: str, verbose: bool = True) -> str:
             # Rate limit hatası
             if "429" in error_msg or "Resource exhausted" in error_msg or "quota" in error_msg.lower():
                 wait_time = 30 * (attempt + 1)
-                print(f"\n⚠️ Rate limit aşıldı (429 Error)")
+                print(f"\n[WARN] Rate limit aşıldı (429 Error)")
                 print(f"   {wait_time} saniye bekleniyor... (Deneme {attempt+1}/{max_retries})")
                 
                 # MCP client'ı kapat
                 if mcp_client:
                     try:
-                        await mcp_client.close()
-                    except:
+                        if hasattr(mcp_client, 'close'):
+                            await mcp_client.close()
+                        elif hasattr(mcp_client, '__aexit__'):
+                            await mcp_client.__aexit__(None, None, None)
+                    except Exception:
                         pass
                 
                 await asyncio.sleep(wait_time)
                 continue
             
             # Diğer hatalar
-            error_msg = f"❌ Hata: {str(e)}"
+            error_msg = f"[ERROR] Hata: {str(e)}"
             if verbose:
                 print(f"\n{error_msg}")
                 import traceback
@@ -488,14 +492,17 @@ async def run_research(question: str, verbose: bool = True) -> str:
         
         finally:
             # MCP client'ı her durumda kapat
-            if mcp_client and hasattr(mcp_client, 'close'):
+            if mcp_client:
                 try:
-                    await mcp_client.close()
+                    if hasattr(mcp_client, 'close'):
+                        await mcp_client.close()
+                    elif hasattr(mcp_client, '__aexit__'):
+                        await mcp_client.__aexit__(None, None, None)
                 except Exception as close_error:
                     if verbose:
-                        print(f"⚠️ MCP client kapatma hatası: {close_error}")
+                        print(f"[WARN] MCP client kapatma hatası: {close_error}")
     
-    return "❌ Maksimum deneme sayısına ulaşıldı. Lütfen birkaç dakika sonra tekrar deneyin."
+    return "[ERROR] Maksimum deneme sayısına ulaşıldı. Lütfen birkaç dakika sonra tekrar deneyin."
 
 
 def run_research_sync(question: str, verbose: bool = True) -> str:
@@ -540,6 +547,6 @@ async def interactive_mode():
             print("\n\n👋 Görüşmek üzere!")
             break
         except Exception as e:
-            print(f"\n❌ Beklenmeyen hata: {e}")
+            print(f"\n[ERROR] Beklenmeyen hata: {e}")
             import traceback
             traceback.print_exc()

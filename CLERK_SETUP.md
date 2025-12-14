@@ -14,12 +14,15 @@ Dashboard'da:
 
 ## 3️⃣ .env.local Oluşturun
 
-`copilotkit-ui/.env.local` dosyası oluşturun:
+`multi_agent_search/copilotkit-ui/.env.local` dosyası oluşturun (örnek değişkenler `multi_agent_search/copilotkit-ui/env.example` dosyasında var):
 
 ```env
 # Clerk Keys
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_your-key-here
 CLERK_SECRET_KEY=sk_test_your-key-here
+
+# Backend URL (optional)
+NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
 
 # Clerk URLs (optional)
 NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in

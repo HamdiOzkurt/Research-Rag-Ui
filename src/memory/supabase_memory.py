@@ -26,17 +26,17 @@ class SupabaseMemory:
         
         if not create_client:
             self.client = None
-            print("⚠️ supabase paketi kurulu değil - memory devre dışı")
+            print("[WARN] supabase paketi kurulu degil - memory devre disi")
         elif not self.supabase_url or not self.supabase_key:
             self.client = None
-            print("⚠️ Supabase credentials bulunamadı - memory devre dışı")
+            print("[WARN] Supabase credentials bulunamadi - memory devre disi")
         else:
             try:
                 self.client: Client = create_client(self.supabase_url, self.supabase_key)
-                print("✅ Supabase memory aktif")
+                print("[OK] Supabase memory aktif")
             except Exception as e:
                 self.client = None
-                print(f"⚠️ Supabase bağlantı hatası: {e}")
+                print(f"Supabase bağlantı hatası: {e}")
 
     def is_enabled(self) -> bool:
         """Supabase memory aktif mi?"""
@@ -71,7 +71,7 @@ class SupabaseMemory:
             return True
             
         except Exception as e:
-            print(f"⚠️ Supabase kayıt hatası: {e}")
+            print(f"[WARN] Supabase kayıt hatası: {e}")
             return False
     
     def load_history(
@@ -105,7 +105,7 @@ class SupabaseMemory:
             return messages
             
         except Exception as e:
-            print(f"⚠️ Supabase yükleme hatası: {e}")
+            print(f"[WARN] Supabase yükleme hatası: {e}")
             return []
 
     # =============================================================================
@@ -147,7 +147,7 @@ class SupabaseMemory:
                     }
             return list(threads.values())[:limit]
         except Exception as e:
-            print(f"⚠️ Supabase threads hatası: {e}")
+            print(f"[WARN] Supabase threads hatası: {e}")
             return []
 
     def load_thread(self, user_id: str, thread_id: str, limit: int = 200) -> List[Dict[str, Any]]:
@@ -183,7 +183,7 @@ class SupabaseMemory:
                 )
             return out
         except Exception as e:
-            print(f"⚠️ Supabase load_thread hatası: {e}")
+            print(f"[WARN] Supabase load_thread hatası: {e}")
             return []
 
     def delete_thread(self, user_id: str, thread_id: str) -> bool:
@@ -198,7 +198,7 @@ class SupabaseMemory:
             self.client.table("conversations").delete().eq("session_id", thread_id).execute()
             return True
         except Exception as e:
-            print(f"⚠️ Supabase delete_thread hatası: {e}")
+            print(f"[WARN] Supabase delete_thread hatası: {e}")
             return False
     
     def clear_session(self, session_id: Optional[str] = None):
@@ -211,7 +211,7 @@ class SupabaseMemory:
             self.client.table("conversations").delete().eq("session_id", sid).execute()
             return True
         except Exception as e:
-            print(f"⚠️ Supabase silme hatası: {e}")
+            print(f"[WARN] Supabase silme hatası: {e}")
             return False
 
 

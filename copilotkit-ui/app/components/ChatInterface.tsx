@@ -1,9 +1,16 @@
 'use client'
 
 import { useState, useRef, useEffect } from "react";
-import { Send, Loader2, Trash2, TrendingUp, MessageSquare } from "lucide-react";
-import { useUser } from "@clerk/nextjs";
-import { chat as chatApi } from "@/lib/api";
+import { Send, Loader2, Trash2, TrendingUp, MessageSquare, Zap, Users, Brain } from "lucide-react";
+import { useAuth, useUser } from "@clerk/nextjs";
+import { chat as chatApi, AgentMode } from "@/lib/api";
+import { formatError } from "@/lib/errors";
+
+const AGENT_MODES: { value: AgentMode; label: string; icon: React.ReactNode; desc: string }[] = [
+  { value: "simple", label: "Hızlı", icon: <Zap className="w-4 h-4" />, desc: "Tek agent, hızlı yanıt" },
+  { value: "multi", label: "Multi-Agent", icon: <Users className="w-4 h-4" />, desc: "Supervisor + Researcher + Coder + Writer" },
+  { value: "deep", label: "Deep Research", icon: <Brain className="w-4 h-4" />, desc: "MCP + Full pipeline" },
+];
 
 type Message = {
   role: "user" | "assistant";
@@ -11,19 +18,32 @@ type Message = {
   timestamp: Date;
 };
 
-// Modern chat hook
+// Modern chat hook with mode support
 function useCopilotChat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
+  const [mode, setMode] = useState<AgentMode>("simple");
   const { user } = useUser();
+  const { getToken } = useAuth();
 
   useEffect(() => {
     try {
       const stored = localStorage.getItem("threadId_chat");
       if (stored) setThreadId(stored);
+      const storedMode = localStorage.getItem("agent_mode") as AgentMode;
+      if (storedMode && ["simple", "multi", "deep"].includes(storedMode)) {
+        setMode(storedMode);
+      }
     } catch {}
   }, []);
+
+  const changeMode = (newMode: AgentMode) => {
+    setMode(newMode);
+    try {
+      localStorage.setItem("agent_mode", newMode);
+    } catch {}
+  };
 
   const appendMessage = async (content: string, role: "user" | "assistant" = "user") => {
     const newMessage: Message = {
@@ -37,11 +57,13 @@ function useCopilotChat() {
     if (role === "user") {
       setIsLoading(true);
       try {
+        const token = await getToken();
         const data = await chatApi({
           message: content,
-          userId: user?.id,
           threadId,
           useCache: true,
+          token,
+          mode,
         });
         if (data.thread_id) {
           setThreadId(data.thread_id);
@@ -58,7 +80,7 @@ function useCopilotChat() {
       } catch (error) {
         setMessages(prev => [...prev, {
           role: "assistant",
-          content: `❌ Backend hatası: ${error}. Backend'i çalıştırın: python -m uvicorn src.simple_copilot_backend:app --reload`,
+          content: `❌ ${formatError(error)}`,
           timestamp: new Date(),
         }]);
       } finally {
@@ -81,11 +103,13 @@ function useCopilotChat() {
     appendMessage,
     deleteMessage,
     clearMessages,
+    mode,
+    changeMode,
   };
 }
 
 export default function ChatInterface() {
-  const { messages, isLoading, appendMessage, deleteMessage, clearMessages } = useCopilotChat();
+  const { messages, isLoading, appendMessage, deleteMessage, clearMessages, mode, changeMode } = useCopilotChat();
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -113,29 +137,41 @@ export default function ChatInterface() {
   ];
 
   return (
-    <div className="flex h-[calc(100vh-64px)] bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
+    <div className="flex h-full bg-background">
       <div className="flex-1 flex flex-col max-w-5xl mx-auto w-full">
         {/* Header */}
-        <div className="p-6 bg-white/80 backdrop-blur-sm border-b flex items-center justify-between">
+        <div className="p-5 border-b bg-background flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <div className="relative">
-              <MessageSquare className="w-8 h-8 text-blue-600" />
-              <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></div>
-            </div>
+            <MessageSquare className="w-5 h-5 text-muted-foreground" />
             <div>
-              <h2 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                CopilotChat
-              </h2>
-              <p className="text-sm text-gray-500 flex items-center gap-2">
-                <TrendingUp className="w-3 h-3" />
-                Full screen interface
-              </p>
+              <h2 className="text-sm font-semibold">Chat</h2>
+              <p className="text-xs text-muted-foreground">Full screen</p>
             </div>
           </div>
+          
+          {/* Mode Selector */}
+          <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-1">
+            {AGENT_MODES.map((m) => (
+              <button
+                key={m.value}
+                onClick={() => changeMode(m.value)}
+                title={m.desc}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md transition-all ${
+                  mode === m.value
+                    ? "bg-background text-foreground shadow-sm font-medium"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {m.icon}
+                <span className="hidden sm:inline">{m.label}</span>
+              </button>
+            ))}
+          </div>
+
           {messages.length > 0 && (
             <button
               onClick={clearMessages}
-              className="flex items-center gap-2 px-4 py-2 text-sm text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all border border-gray-200 hover:border-red-300"
+              className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:text-foreground rounded-md border"
             >
               <Trash2 className="w-4 h-4" />
               Clear
@@ -144,42 +180,22 @@ export default function ChatInterface() {
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
           {messages.length === 0 ? (
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center max-w-2xl">
-                <div className="relative inline-block mb-8">
-                  <div className="absolute inset-0 bg-gradient-to-r from-blue-400 to-indigo-400 blur-3xl opacity-20 rounded-full"></div>
-                  <div className="relative text-7xl">👋</div>
-                </div>
-                
-                <h2 className="text-3xl font-bold mb-4 bg-gradient-to-r from-gray-900 to-gray-600 bg-clip-text text-transparent">
-                  Merhaba! Size nasıl yardımcı olabilirim?
-                </h2>
-                
-                <p className="text-lg text-gray-600 mb-8">
-                  Web araştırması yapabilir, kod örnekleri oluşturabilir ve detaylı raporlar hazırlayabilirim.
-                </p>
-                
-                <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
-                  <div className="flex items-center gap-2 mb-4">
-                    <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                    <p className="text-sm font-semibold text-gray-700">Örnek Sorular</p>
-                  </div>
-                  <div className="grid gap-3">
-                    {exampleQuestions.map((question, idx) => (
-                      <button
-                        key={idx}
-                        onClick={() => appendMessage(question)}
-                        className="text-left p-4 rounded-xl bg-gradient-to-r from-blue-50 to-indigo-50 hover:from-blue-100 hover:to-indigo-100 border border-blue-200 hover:border-blue-300 transition-all group"
-                      >
-                        <p className="text-sm text-gray-700 group-hover:text-gray-900 font-medium">
-                          {question}
-                        </p>
-                      </button>
-                    ))}
-                  </div>
-                </div>
+            <div className="max-w-xl">
+              <p className="text-sm text-muted-foreground mb-4">
+                Ask a question to start. Examples:
+              </p>
+              <div className="space-y-2">
+                {exampleQuestions.map((q, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => appendMessage(q)}
+                    className="w-full text-left rounded-md border px-3 py-2 text-sm hover:bg-muted"
+                  >
+                    {q}
+                  </button>
+                ))}
               </div>
             </div>
           ) : (
@@ -192,8 +208,8 @@ export default function ChatInterface() {
                   <div
                     className={`rounded-2xl px-6 py-4 shadow-md ${
                       msg.role === "user"
-                        ? "bg-gradient-to-r from-blue-500 to-indigo-600 text-white"
-                        : "bg-white border border-gray-200"
+                        ? "bg-slate-900 text-white"
+                        : "bg-white border"
                     }`}
                   >
                     <div className="whitespace-pre-wrap text-sm leading-relaxed">
@@ -218,10 +234,10 @@ export default function ChatInterface() {
           
           {isLoading && (
             <div className="flex justify-start animate-in fade-in slide-in-from-bottom-2">
-              <div className="bg-white shadow-md rounded-2xl px-6 py-4 border border-gray-200">
+              <div className="bg-white rounded-xl px-4 py-3 border">
                 <div className="flex items-center space-x-3">
-                  <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />
-                  <span className="text-sm text-gray-600">AI düşünüyor...</span>
+                  <Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />
+                  <span className="text-sm text-muted-foreground">Thinking…</span>
                 </div>
               </div>
             </div>
@@ -231,7 +247,7 @@ export default function ChatInterface() {
         </div>
 
         {/* Input */}
-        <div className="border-t bg-white/80 backdrop-blur-sm p-6">
+        <div className="border-t bg-background p-4">
           <form onSubmit={handleSubmit} className="flex space-x-3">
             <input
               type="text"
@@ -239,12 +255,12 @@ export default function ChatInterface() {
               onChange={(e) => setInput(e.target.value)}
               placeholder="Bir şey sorun..."
               disabled={isLoading}
-              className="flex-1 px-6 py-4 border-2 border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-50 disabled:cursor-not-allowed bg-white shadow-sm transition-all"
+              className="flex-1 px-4 py-3 border rounded-md focus:outline-none focus:ring-2 focus:ring-slate-300 disabled:bg-muted"
             />
             <button
               type="submit"
               disabled={isLoading || !input.trim()}
-              className="px-8 py-4 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl hover:from-blue-600 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-medium shadow-lg hover:shadow-xl hover:-translate-y-0.5 flex items-center gap-2"
+              className="px-4 py-3 bg-slate-900 text-white rounded-md hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-medium flex items-center gap-2"
             >
               {isLoading ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
@@ -255,15 +271,8 @@ export default function ChatInterface() {
             </button>
           </form>
           
-          <div className="flex items-center justify-between mt-4 px-2">
-            <p className="text-xs text-gray-500">
-              Powered by <span className="font-semibold text-blue-600">DeepAgents</span> • {messages.length} mesaj
-            </p>
-            {messages.length > 0 && (
-              <p className="text-xs text-gray-400">
-                Shift + Enter for new line
-              </p>
-            )}
+          <div className="mt-2 text-xs text-muted-foreground">
+            Powered by DeepAgents • {messages.length} messages
           </div>
         </div>
       </div>

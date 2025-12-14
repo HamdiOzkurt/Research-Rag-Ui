@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { useEffect, useState } from "react";
+import { useAuth } from "@clerk/nextjs";
 import { listThreads } from "@/lib/api";
 
 type DashboardProps = {
@@ -17,12 +18,14 @@ type DashboardProps = {
 
 export default function DashboardPage({ stats, backendStatus, currentMode, onNavigate, userId }: DashboardProps) {
   const [threads, setThreads] = useState<Array<{ thread_id: string; preview: string; last_message_at?: string }>>([]);
+  const { getToken } = useAuth();
 
   useEffect(() => {
     const run = async () => {
       if (!userId) return;
       try {
-        const res = await listThreads(userId, 20);
+        const token = await getToken();
+        const res = await listThreads(20, token);
         setThreads(Array.isArray(res) ? res : []);
       } catch {
         // ignore
@@ -32,93 +35,102 @@ export default function DashboardPage({ stats, backendStatus, currentMode, onNav
   }, [userId]);
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="max-w-7xl mx-auto p-6 space-y-6">
-        {/* Hero Section */}
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-500 via-purple-500 to-indigo-600 p-8 text-white shadow-2xl">
-          <div className="relative z-10">
-            <h1 className="text-4xl font-bold mb-2">Welcome to AI Research</h1>
-            <p className="text-blue-100 text-lg">
-              Powerful AI-powered research assistant with multi-agent system
-            </p>
-            <div className="flex items-center space-x-4 mt-6">
-              <Badge variant="secondary" className="bg-white/20 text-white border-white/30">
-                DeepAgents
-              </Badge>
-              <Badge variant="secondary" className="bg-white/20 text-white border-white/30">
-                LangGraph
-              </Badge>
-              <Badge variant="secondary" className="bg-white/20 text-white border-white/30">
-                Next.js 14
-              </Badge>
+    <div className="h-full overflow-y-auto bg-gradient-to-br from-slate-50 via-white to-slate-50">
+      <div className="max-w-7xl mx-auto p-8 space-y-8">
+        {/* Modern Header */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-lg">
+              <span className="text-2xl">🚀</span>
+            </div>
+            <div>
+              <h1 className="text-3xl font-bold bg-gradient-to-r from-slate-900 via-slate-700 to-slate-900 bg-clip-text text-transparent">
+                AI Research Assistant
+              </h1>
+              <p className="text-sm text-slate-500 mt-1">
+                Powered by DeepAgents • Multi-Agent System
+              </p>
             </div>
           </div>
-          <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl"></div>
-          <div className="absolute bottom-0 left-0 w-48 h-48 bg-white/10 rounded-full blur-3xl"></div>
         </div>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Modern Stats Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {/* Backend Status */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-slate-600">Backend Status</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center space-x-2">
+          <div className="group relative overflow-hidden rounded-3xl bg-white/80 backdrop-blur-xl border border-slate-200/50 shadow-xl hover:shadow-2xl transition-all duration-300 hover:-translate-y-1">
+            <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/10 to-teal-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+            <div className="relative p-6">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</span>
                 <div className={`w-3 h-3 rounded-full ${
-                  backendStatus === "online" ? "bg-green-500" : "bg-red-500"
-                }`}></div>
-                <span className="text-2xl font-bold">
-                  {backendStatus === "online" ? "Online" : "Offline"}
-                </span>
+                  backendStatus === "online" ? "bg-emerald-500 animate-pulse" : "bg-rose-500"
+                } shadow-lg`}></div>
               </div>
-              <p className="text-xs text-slate-500 mt-2">
+              <div className="text-3xl font-bold bg-gradient-to-br from-slate-900 to-slate-600 bg-clip-text text-transparent mb-2">
+                {backendStatus === "online" ? "Online" : "Offline"}
+              </div>
+              <p className="text-sm text-slate-500">
                 {backendStatus === "online" ? "All systems operational" : "Backend not responding"}
               </p>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
 
           {/* Cache Entries */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-slate-600">Cached Responses</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stats?.cache?.entries || 0}</div>
-              <p className="text-xs text-slate-500 mt-2">
-                Max: {stats?.cache?.max_size || 100} entries
+          <div className="group relative overflow-hidden rounded-3xl bg-white/80 backdrop-blur-xl border border-slate-200/50 shadow-xl hover:shadow-2xl transition-all duration-300 hover:-translate-y-1">
+            <div className="absolute inset-0 bg-gradient-to-br from-purple-500/10 to-pink-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+            <div className="relative p-6">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Cache</span>
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white">
+                  💾
+                </div>
+              </div>
+              <div className="text-3xl font-bold bg-gradient-to-br from-purple-600 to-pink-600 bg-clip-text text-transparent mb-2">
+                {stats?.cache?.entries || 0}
+              </div>
+              <p className="text-sm text-slate-500">
+                of {stats?.cache?.max_size || 100} entries
               </p>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
 
           {/* Rate Limit */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-slate-600">Remaining Requests</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-blue-600">
-                {stats?.rate_limit?.remaining || 0} / {stats?.rate_limit?.max_requests_per_minute || 10}
+          <div className="group relative overflow-hidden rounded-3xl bg-white/80 backdrop-blur-xl border border-slate-200/50 shadow-xl hover:shadow-2xl transition-all duration-300 hover:-translate-y-1">
+            <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-cyan-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+            <div className="relative p-6">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Requests</span>
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white">
+                  ⚡
+                </div>
               </div>
-              <p className="text-xs text-slate-500 mt-2">
-                Resets in {stats?.rate_limit?.reset_in_seconds || 0}s
+              <div className="text-3xl font-bold bg-gradient-to-br from-blue-600 to-cyan-600 bg-clip-text text-transparent mb-2">
+                {stats?.rate_limit?.remaining || 0}
+              </div>
+              <p className="text-sm text-slate-500">
+                of {stats?.rate_limit?.max_requests_per_minute || 10} • Resets {stats?.rate_limit?.reset_in_seconds || 0}s
               </p>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
 
           {/* API Keys */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-slate-600">API Keys</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">Multi-Key</div>
-              <p className="text-xs text-slate-500 mt-2">
-                Rotation enabled
+          <div className="group relative overflow-hidden rounded-3xl bg-white/80 backdrop-blur-xl border border-slate-200/50 shadow-xl hover:shadow-2xl transition-all duration-300 hover:-translate-y-1">
+            <div className="absolute inset-0 bg-gradient-to-br from-amber-500/10 to-orange-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+            <div className="relative p-6">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">API</span>
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center text-white">
+                  🔑
+                </div>
+              </div>
+              <div className="text-3xl font-bold bg-gradient-to-br from-amber-600 to-orange-600 bg-clip-text text-transparent mb-2">
+                Multi-Key
+              </div>
+              <p className="text-sm text-slate-500">
+                Auto rotation enabled
               </p>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </div>
 
         {/* Features Grid */}
@@ -126,13 +138,13 @@ export default function DashboardPage({ stats, backendStatus, currentMode, onNav
           {/* AI Agents */}
           <Card>
             <CardHeader>
-              <CardTitle>🤖 AI Agents</CardTitle>
-              <CardDescription>Multi-agent research system</CardDescription>
+              <CardTitle>Agents</CardTitle>
+              <CardDescription>Available agent modes</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex items-start space-x-3">
                 <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <span className="text-xl">⚡</span>
+                  <span className="text-sm font-semibold text-blue-700">S</span>
                 </div>
                 <div className="flex-1">
                   <h4 className="font-medium text-sm">Simple Agent</h4>
@@ -145,7 +157,7 @@ export default function DashboardPage({ stats, backendStatus, currentMode, onNav
               
               <div className="flex items-start space-x-3">
                 <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <span className="text-xl">🔍</span>
+                  <span className="text-sm font-semibold text-purple-700">D</span>
                 </div>
                 <div className="flex-1">
                   <h4 className="font-medium text-sm">DeepAgent</h4>
@@ -158,7 +170,7 @@ export default function DashboardPage({ stats, backendStatus, currentMode, onNav
               
               <div className="flex items-start space-x-3">
                 <div className="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <span className="text-xl">🧠</span>
+                  <span className="text-sm font-semibold text-indigo-700">M</span>
                 </div>
                 <div className="flex-1">
                   <h4 className="font-medium text-sm">Multi-Agent System</h4>
@@ -172,8 +184,8 @@ export default function DashboardPage({ stats, backendStatus, currentMode, onNav
           {/* UI Modes */}
           <Card>
             <CardHeader>
-              <CardTitle>🎨 UI Modes</CardTitle>
-              <CardDescription>Choose your preferred interface</CardDescription>
+              <CardTitle>Interface</CardTitle>
+              <CardDescription>Choose your workspace</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               <Button
@@ -181,10 +193,9 @@ export default function DashboardPage({ stats, backendStatus, currentMode, onNav
                 variant={currentMode === "chat" ? "default" : "outline"}
                 className="w-full justify-start gap-3 h-auto py-3"
               >
-                <span className="text-2xl">💬</span>
                 <div className="text-left flex-1">
-                  <div className="font-medium">CopilotChat</div>
-                  <div className="text-xs opacity-70">Full screen chat interface</div>
+                  <div className="font-medium">Chat</div>
+                  <div className="text-xs opacity-70">Full screen</div>
                 </div>
               </Button>
               
@@ -193,10 +204,9 @@ export default function DashboardPage({ stats, backendStatus, currentMode, onNav
                 variant={currentMode === "sidebar" ? "default" : "outline"}
                 className="w-full justify-start gap-3 h-auto py-3"
               >
-                <span className="text-2xl">📋</span>
                 <div className="text-left flex-1">
-                  <div className="font-medium">CopilotSidebar</div>
-                  <div className="text-xs opacity-70">Dashboard with collapsible chat</div>
+                  <div className="font-medium">Sidebar</div>
+                  <div className="text-xs opacity-70">Dashboard + assistant</div>
                 </div>
               </Button>
               
@@ -205,10 +215,9 @@ export default function DashboardPage({ stats, backendStatus, currentMode, onNav
                 variant={currentMode === "popup" ? "default" : "outline"}
                 className="w-full justify-start gap-3 h-auto py-3"
               >
-                <span className="text-2xl">💭</span>
                 <div className="text-left flex-1">
-                  <div className="font-medium">CopilotPopup</div>
-                  <div className="text-xs opacity-70">Floating chat bubble</div>
+                  <div className="font-medium">Popup</div>
+                  <div className="text-xs opacity-70">Floating assistant</div>
                 </div>
               </Button>
             </CardContent>
@@ -218,14 +227,14 @@ export default function DashboardPage({ stats, backendStatus, currentMode, onNav
         {/* Features */}
         <Card>
           <CardHeader>
-            <CardTitle>✨ Features</CardTitle>
-            <CardDescription>What makes this assistant powerful</CardDescription>
+            <CardTitle>Features</CardTitle>
+            <CardDescription>Core capabilities</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               <div className="flex items-start space-x-3">
                 <div className="w-8 h-8 bg-green-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <span>🔄</span>
+                  <span className="text-xs font-semibold text-green-700">K</span>
                 </div>
                 <div>
                   <h4 className="font-medium text-sm">Multi API Keys</h4>
@@ -235,7 +244,7 @@ export default function DashboardPage({ stats, backendStatus, currentMode, onNav
               
               <div className="flex items-start space-x-3">
                 <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <span>💾</span>
+                  <span className="text-xs font-semibold text-blue-700">C</span>
                 </div>
                 <div>
                   <h4 className="font-medium text-sm">Response Caching</h4>
@@ -245,7 +254,7 @@ export default function DashboardPage({ stats, backendStatus, currentMode, onNav
               
               <div className="flex items-start space-x-3">
                 <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <span>🚀</span>
+                  <span className="text-xs font-semibold text-purple-700">W</span>
                 </div>
                 <div>
                   <h4 className="font-medium text-sm">Web Research</h4>
@@ -255,7 +264,7 @@ export default function DashboardPage({ stats, backendStatus, currentMode, onNav
               
               <div className="flex items-start space-x-3">
                 <div className="w-8 h-8 bg-indigo-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <span>💻</span>
+                  <span className="text-xs font-semibold text-indigo-700">X</span>
                 </div>
                 <div>
                   <h4 className="font-medium text-sm">Code Examples</h4>
@@ -265,7 +274,7 @@ export default function DashboardPage({ stats, backendStatus, currentMode, onNav
               
               <div className="flex items-start space-x-3">
                 <div className="w-8 h-8 bg-pink-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <span>📝</span>
+                  <span className="text-xs font-semibold text-pink-700">T</span>
                 </div>
                 <div>
                   <h4 className="font-medium text-sm">Turkish Reports</h4>
@@ -275,7 +284,7 @@ export default function DashboardPage({ stats, backendStatus, currentMode, onNav
               
               <div className="flex items-start space-x-3">
                 <div className="w-8 h-8 bg-orange-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <span>🛡️</span>
+                  <span className="text-xs font-semibold text-orange-700">R</span>
                 </div>
                 <div>
                   <h4 className="font-medium text-sm">Rate Protection</h4>

@@ -67,10 +67,10 @@ class Settings(BaseModel):
         """Sonraki API key'e geç"""
         if mark_failed and self.google_api_keys:
             self._failed_keys.add(self._current_key_index)
-            logger.warning(f"⚠️ API Key {self._current_key_index + 1} failed, rotating...")
+            logger.warning(f"[WARN] API Key {self._current_key_index + 1} failed, rotating...")
         
         self._current_key_index = (self._current_key_index + 1) % max(1, len(self.google_api_keys))
-        logger.info(f"🔄 Rotated to API Key {self._current_key_index + 1}/{len(self.google_api_keys)}")
+        logger.info(f"[ROTATE] Rotated to API Key {self._current_key_index + 1}/{len(self.google_api_keys)}")
     
     def get_random_api_key(self) -> Optional[str]:
         """Rastgele bir API key döndür"""

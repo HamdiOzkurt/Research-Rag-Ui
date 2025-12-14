@@ -2,8 +2,9 @@
 
 import { useState, useRef, useEffect } from "react";
 import { Send, Loader2, X, MessageCircle, Sparkles } from "lucide-react";
-import { useUser } from "@clerk/nextjs";
+import { useAuth, useUser } from "@clerk/nextjs";
 import { chat as chatApi } from "@/lib/api";
+import { formatError } from "@/lib/errors";
 
 type Message = {
   role: "user" | "assistant";
@@ -15,6 +16,7 @@ function useCopilotChat() {
   const [isLoading, setIsLoading] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
   const { user } = useUser();
+  const { getToken } = useAuth();
 
   useEffect(() => {
     try {
@@ -28,11 +30,12 @@ function useCopilotChat() {
     if (role === "user") {
       setIsLoading(true);
       try {
+        const token = await getToken();
         const data = await chatApi({
           message: content,
-          userId: user?.id,
           threadId,
           useCache: true,
+          token,
         });
         if (data.thread_id) {
           setThreadId(data.thread_id);
@@ -42,7 +45,7 @@ function useCopilotChat() {
         }
         setMessages(prev => [...prev, { role: "assistant", content: data.response }]);
       } catch (error) {
-        setMessages(prev => [...prev, { role: "assistant", content: `❌ ${error}` }]);
+        setMessages(prev => [...prev, { role: "assistant", content: `❌ ${formatError(error)}` }]);
       } finally {
         setIsLoading(false);
       }
@@ -71,22 +74,20 @@ export default function PopupInterface() {
   };
 
   return (
-    <div className="h-[calc(100vh-64px)] bg-gradient-to-br from-slate-50 via-purple-50 to-pink-50">
+    <div className="h-full bg-background">
       {/* Main Content */}
       <div className="p-8 max-w-7xl mx-auto">
-        <h1 className="text-4xl font-bold mb-2 bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
-          🎯 Your Main Application
-        </h1>
-        <p className="text-gray-600 mb-8">Click the button below to open AI assistant</p>
+        <h1 className="text-lg font-semibold mb-1">Your Main Application</h1>
+        <p className="text-sm text-muted-foreground mb-6">Floating assistant demo</p>
         
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {[1, 2, 3, 4, 5, 6].map((i) => (
-            <div key={i} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 hover:shadow-lg transition-all hover:-translate-y-1">
-              <div className="w-12 h-12 bg-gradient-to-br from-purple-100 to-pink-100 rounded-xl flex items-center justify-center mb-4">
-                <Sparkles className="w-6 h-6 text-purple-600" />
+            <div key={i} className="bg-white p-6 rounded-xl shadow-sm border hover:shadow-md transition-all">
+              <div className="w-10 h-10 bg-muted rounded-lg flex items-center justify-center mb-4">
+                <Sparkles className="w-5 h-5 text-muted-foreground" />
               </div>
               <h3 className="font-semibold text-lg mb-2">Feature {i}</h3>
-              <p className="text-sm text-gray-600">
+              <p className="text-sm text-muted-foreground">
                 Your app content goes here. The chat popup floats over this content.
               </p>
             </div>
@@ -96,33 +97,31 @@ export default function PopupInterface() {
 
       {/* Floating Popup */}
       {isOpen && (
-        <div className="fixed bottom-6 right-6 w-[400px] h-[600px] bg-white rounded-2xl shadow-2xl border border-gray-200 flex flex-col overflow-hidden animate-in slide-in-from-bottom-8 duration-300">
+        <div className="fixed bottom-6 right-6 w-[400px] h-[560px] bg-white rounded-xl shadow-2xl border flex flex-col overflow-hidden animate-in slide-in-from-bottom-8 duration-300">
           {/* Header */}
-          <div className="p-5 bg-gradient-to-r from-purple-500 to-pink-600 flex items-center justify-between">
+          <div className="p-4 bg-background border-b flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center">
-                <MessageCircle className="w-5 h-5 text-white" />
+              <div className="w-9 h-9 bg-slate-900 rounded-md flex items-center justify-center">
+                <MessageCircle className="w-4 h-4 text-white" />
               </div>
               <div>
-                <h2 className="font-semibold text-white text-sm">Popup Assistant</h2>
-                <p className="text-xs text-purple-100">Need any help?</p>
+                <h2 className="font-semibold text-sm">Assistant</h2>
+                <p className="text-xs text-muted-foreground">Popup</p>
               </div>
             </div>
             <button
               onClick={() => setIsOpen(false)}
-              className="text-white/80 hover:text-white transition-colors"
+              className="text-muted-foreground hover:text-foreground transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
 
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50">
+          <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-muted/30">
             {messages.length === 0 ? (
               <div className="text-center py-12">
-                <div className="text-5xl mb-3">👋</div>
-                <p className="text-sm text-gray-700 font-medium">Need any help?</p>
-                <p className="text-xs text-gray-500 mt-2">Ask me anything!</p>
+                <p className="text-sm text-muted-foreground">Ask a question to start.</p>
               </div>
             ) : (
               messages.map((msg, idx) => (
@@ -133,8 +132,8 @@ export default function PopupInterface() {
                   <div
                     className={`max-w-[85%] rounded-xl px-4 py-2.5 text-sm shadow-sm ${
                       msg.role === "user"
-                        ? "bg-gradient-to-r from-purple-500 to-pink-600 text-white"
-                        : "bg-white border border-gray-200 text-gray-800"
+                        ? "bg-slate-900 text-white"
+                        : "bg-white border text-gray-800"
                     }`}
                   >
                     {msg.content}
@@ -146,8 +145,8 @@ export default function PopupInterface() {
               <div className="flex justify-start">
                 <div className="bg-white border rounded-xl px-4 py-2.5 shadow-sm">
                   <div className="flex items-center space-x-2">
-                    <Loader2 className="w-3 h-3 text-purple-500 animate-spin" />
-                    <span className="text-xs text-gray-600">Thinking...</span>
+                    <Loader2 className="w-3 h-3 text-muted-foreground animate-spin" />
+                    <span className="text-xs text-muted-foreground">Thinking...</span>
                   </div>
                 </div>
               </div>
@@ -156,7 +155,7 @@ export default function PopupInterface() {
           </div>
 
           {/* Input */}
-          <div className="p-4 border-t bg-white">
+          <div className="p-4 border-t bg-background">
             <form onSubmit={handleSubmit} className="flex space-x-2">
               <input
                 type="text"
@@ -169,7 +168,7 @@ export default function PopupInterface() {
               <button
                 type="submit"
                 disabled={isLoading || !input.trim()}
-                className="px-4 py-2.5 bg-gradient-to-r from-purple-500 to-pink-600 text-white rounded-lg hover:from-purple-600 hover:to-pink-700 disabled:opacity-50 transition-all shadow-sm"
+                className="px-4 py-2.5 bg-slate-900 text-white rounded-lg hover:bg-slate-800 disabled:opacity-50 transition-all shadow-sm"
               >
                 <Send className="w-4 h-4" />
               </button>
@@ -182,7 +181,7 @@ export default function PopupInterface() {
       {!isOpen && (
         <button
           onClick={() => setIsOpen(true)}
-          className="fixed bottom-6 right-6 w-16 h-16 bg-gradient-to-br from-purple-500 to-pink-600 text-white rounded-full shadow-2xl hover:scale-110 transition-transform flex items-center justify-center group"
+          className="fixed bottom-6 right-6 w-14 h-14 bg-slate-900 text-white rounded-full shadow-2xl hover:bg-slate-800 transition-transform flex items-center justify-center group"
         >
           <MessageCircle className="w-7 h-7 group-hover:rotate-12 transition-transform" />
           <div className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center text-xs font-bold animate-pulse">

@@ -1,8 +1,10 @@
 """
 Multi-Agent Research System - FIXED VERSION
 Gerçek çoklu ajan mimarisi - Supervisor + Researcher + Coder + Writer
+LangSmith Tracing desteği
 """
 
+import os
 from typing import Annotated, Literal, TypedDict, List
 from pydantic import BaseModel, Field
 from langgraph.graph import StateGraph, END
@@ -17,6 +19,19 @@ import logging
 # Logging setup
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# ============ LANGSMITH TRACING ============
+def setup_langsmith():
+    """LangSmith tracing'i aktifleştir"""
+    if settings.langsmith_api_key:
+        os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
+        os.environ.setdefault("LANGCHAIN_PROJECT", "ai-research-multi-agent")
+        os.environ["LANGCHAIN_API_KEY"] = settings.langsmith_api_key
+        logger.info("[LANGSMITH] Tracing aktif: ai-research-multi-agent")
+        return True
+    return False
+
+_langsmith_enabled = setup_langsmith()
 
 
 # =============================================================================
@@ -121,7 +136,7 @@ Rapor Formatı:
 [2-3 cümle]
 
 ## 📖 Detaylı Açıklama
-### 🔍 Nedir?
+### [SEARCH] Nedir?
 [Paragraf]
 
 ### 💡 Nasıl Çalışır?
@@ -136,9 +151,9 @@ Rapor Formatı:
 ## 🎯 Kullanım Alanları
 [Tablo]
 
-## ✅ Avantajlar & ❌ Dezavantajlar
+## [OK] Avantajlar & [ERROR] Dezavantajlar
 
-## 🚀 Hızlı Başlangıç
+## [START] Hızlı Başlangıç
 
 ## 📚 Kaynaklar
 
@@ -160,13 +175,13 @@ async def supervisor_node(state: AgentState) -> AgentState:
         
         supervisor = create_deep_agent(
             model=model,
-            instructions=SUPERVISOR_PROMPT.format(query=state["query"]),
-            tools=[]
+            tools=[],
+            system_prompt=SUPERVISOR_PROMPT.format(query=state["query"]),
         )
         
         result = await supervisor.ainvoke(
             {"messages": [{"role": "user", "content": state["query"]}]},
-            config={"recursion_limit": 3}  # Artırıldı: 1 → 3
+            config={"recursion_limit": 15}  # Artırıldı: 3 → 15
         )
         
         response_content = ""
@@ -208,10 +223,10 @@ async def supervisor_node(state: AgentState) -> AgentState:
             else f"🎯 Plan: {agents_order}"
         ))
         
-        logger.info(f"✅ Supervisor tamamlandı. Next: {state['next_agent']}")
+        logger.info(f"[OK] Supervisor tamamlandı. Next: {state['next_agent']}")
         
     except Exception as e:
-        logger.error(f"❌ Supervisor Error: {str(e)}", exc_info=True)
+        logger.error(f"[ERROR] Supervisor Error: {str(e)}", exc_info=True)
         state["messages"].append(AIMessage(content=f"⚠️ Supervisor hatası, varsayılan plan"))
         state["next_agent"] = "researcher"
         state["supervisor_plan"] = "researcher -> coder -> writer"
@@ -223,7 +238,7 @@ async def supervisor_node(state: AgentState) -> AgentState:
 async def researcher_node(state: AgentState, mcp_tools: list) -> AgentState:
     """Araştırmacı: Web araması yapar"""
     try:
-        logger.info("🔍 Researcher başladı...")
+        logger.info("[SEARCH] Researcher başladı...")
         model = get_llm_model()
         
         search_tools = [t for t in mcp_tools if any(
@@ -236,8 +251,8 @@ async def researcher_node(state: AgentState, mcp_tools: list) -> AgentState:
         
         researcher = create_deep_agent(
             model=model,
-            instructions=RESEARCHER_PROMPT.format(query=state["query"]),
-            tools=search_tools
+            tools=search_tools,
+            system_prompt=RESEARCHER_PROMPT.format(query=state["query"]),
         )
         
         result = await researcher.ainvoke(
@@ -253,11 +268,11 @@ async def researcher_node(state: AgentState, mcp_tools: list) -> AgentState:
                     break
         
         state["research_results"] = research_results or "Arama sonucu bulunamadı"
-        state["messages"].append(AIMessage(content=f"🔍 Araştırma tamamlandı"))
-        logger.info("✅ Researcher tamamlandı")
+        state["messages"].append(AIMessage(content=f"[SEARCH] Araştırma tamamlandı"))
+        logger.info("[OK] Researcher tamamlandı")
         
     except Exception as e:
-        logger.error(f"❌ Researcher Error: {str(e)}", exc_info=True)
+        logger.error(f"[ERROR] Researcher Error: {str(e)}", exc_info=True)
         state["research_results"] = "Araştırma başarısız"
         state["messages"].append(AIMessage(content=f"⚠️ Araştırma hatası, devam ediliyor"))
     
@@ -278,11 +293,11 @@ async def coder_node(state: AgentState) -> AgentState:
         
         coder = create_deep_agent(
             model=model,
-            instructions=CODER_PROMPT.format(
+            tools=[],
+            system_prompt=CODER_PROMPT.format(
                 query=state["query"],
                 research_results=state.get("research_results", "")
             ),
-            tools=[]
         )
         
         result = await coder.ainvoke(
@@ -299,10 +314,10 @@ async def coder_node(state: AgentState) -> AgentState:
         
         state["code_examples"] = code_examples or "Kod örneği oluşturulamadı"
         state["messages"].append(AIMessage(content=f"💻 Kod örnekleri hazırlandı"))
-        logger.info("✅ Coder tamamlandı")
+        logger.info("[OK] Coder tamamlandı")
         
     except Exception as e:
-        logger.error(f"❌ Coder Error: {str(e)}", exc_info=True)
+        logger.error(f"[ERROR] Coder Error: {str(e)}", exc_info=True)
         state["code_examples"] = "Kod örnekleri oluşturulamadı"
         state["messages"].append(AIMessage(content=f"⚠️ Kod oluşturma hatası"))
     
@@ -318,12 +333,12 @@ async def writer_node(state: AgentState) -> AgentState:
         
         writer = create_deep_agent(
             model=model,
-            instructions=WRITER_PROMPT.format(
+            tools=[],
+            system_prompt=WRITER_PROMPT.format(
                 query=state["query"],
                 research_results=state.get("research_results", ""),
                 code_examples=state.get("code_examples", "")
             ),
-            tools=[]
         )
         
         result = await writer.ainvoke(
@@ -351,10 +366,10 @@ async def writer_node(state: AgentState) -> AgentState:
         
         state["final_report"] = final_report
         state["messages"].append(AIMessage(content=f"📝 Rapor tamamlandı"))
-        logger.info("✅ Writer tamamlandı")
+        logger.info("[OK] Writer tamamlandı")
         
     except Exception as e:
-        logger.error(f"❌ Writer Error: {str(e)}", exc_info=True)
+        logger.error(f"[ERROR] Writer Error: {str(e)}", exc_info=True)
         state["final_report"] = f"# Rapor Oluşturulamadı\n\nHata: {str(e)}"
         state["messages"].append(AIMessage(content=f"⚠️ Rapor yazma hatası"))
     
@@ -407,7 +422,7 @@ async def create_multi_agent_system():
     for tool in mcp_tools:
         sanitize_tool_schema(tool)
     
-    logger.info(f"✅ {len(mcp_tools)} tool yüklendi")
+    logger.info(f"[OK] {len(mcp_tools)} tool yüklendi")
     
     # Graph oluştur
     workflow = StateGraph(AgentState)
@@ -463,7 +478,7 @@ async def create_multi_agent_system():
     # Compile
     app = workflow.compile()
     
-    logger.info("✅ Multi-Agent sistem hazır!")
+    logger.info("[OK] Multi-Agent sistem hazır!")
     return app, mcp_client
 
 
@@ -489,7 +504,7 @@ async def run_multi_agent_research(query: str, verbose: bool = True) -> str:
     }
     
     if verbose:
-        print("🚀 Multi-Agent araştırma başlatılıyor...\n")
+        print("[START] Multi-Agent araştırma başlatılıyor...\n")
     
     try:
         result = await app.ainvoke(
@@ -509,7 +524,7 @@ async def run_multi_agent_research(query: str, verbose: bool = True) -> str:
         return final_report
         
     except Exception as e:
-        logger.error(f"❌ Run Error: {str(e)}", exc_info=True)
+        logger.error(f"[ERROR] Run Error: {str(e)}", exc_info=True)
         return f"Sistem hatası: {str(e)}"
     finally:
         # MCP client'ı temizle

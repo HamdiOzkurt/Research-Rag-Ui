@@ -13,4 +13,5 @@ supabase
 tavily-python
 fastapi
 uvicorn[standard]
+PyJWT[crypto]
 

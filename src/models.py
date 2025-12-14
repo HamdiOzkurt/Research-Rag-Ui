@@ -67,13 +67,13 @@ def get_llm_model(retry_on_failure: bool = True, max_retries: int = 3):
             os.environ["GOOGLE_API_KEY"] = api_key
             key_count = len(settings.google_api_keys)
             key_index = settings._current_key_index + 1
-            logger.info(f"🤖 Model: {model_name} (Key {key_index}/{key_count})")
+            logger.info(f"[MODEL] Model: {model_name} (Key {key_index}/{key_count})")
         else:
             raise ValueError("Google API key not available")
     
     elif provider == "ollama":
         os.environ["OLLAMA_HOST"] = settings.ollama_base_url
-        logger.info(f"🤖 Model: {model_name} (Ollama Local)")
+        logger.info(f"[MODEL] Model: {model_name} (Ollama Local)")
     
     return init_chat_model(model_string, temperature=0.3)
 
@@ -94,7 +94,7 @@ def get_llm_model_with_retry(max_retries: int = 3):
             
             # 429 veya quota hatası
             if "429" in error_msg or "quota" in error_msg.lower() or "rate" in error_msg.lower():
-                logger.warning(f"⚠️ Rate limit hit, rotating key (attempt {attempt + 1}/{max_retries})")
+                logger.warning(f"[WARN] Rate limit hit, rotating key (attempt {attempt + 1}/{max_retries})")
                 settings.rotate_api_key(mark_failed=True)
             else:
                 raise e
