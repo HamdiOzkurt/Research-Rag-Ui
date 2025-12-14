@@ -7,9 +7,10 @@ langchain-ollama
 mcp
 python-dotenv
 pydantic
-streamlit
 httpx
-nest_asyncio
 watchdog
 supabase
 tavily-python
+fastapi
+uvicorn[standard]
+

@@ -1,232 +1,175 @@
-# 🔬 DeepAgents Multi-Agent Research System
+# 🔍 AI Research Assistant
 
-**Gemini 2.5 Flash + Firecrawl + Tavily + GitHub + Supabase**
+Modern AI araştırma asistanı - DeepAgents + LangGraph + Next.js
 
-Gelişmiş web araştırması yapan, kod arama, Türkçe raporlar üreten, conversation history'yi saklayan AI araştırma asistanı.
+## ⚡ Hızlı Başlangıç
 
----
-
-## ✨ Özellikler
-
-- 🤖 **DeepAgents Framework** - LangGraph tabanlı agent orchestration
-- 🔍 **Çoklu Arama Kaynakları**:
-  - Firecrawl MCP (web scraping)
-  - Tavily MCP (AI-optimized search - 1000 arama/ay ücretsiz)
-  - GitHub MCP (code & repo search - ücretsiz)
-- 🧠 **Gemini 2.5 Flash** - Google'ın en hızlı modeli
-- 💾 **Supabase Memory** - Conversation history persistence
-- 📊 **LangSmith Tracing** - Agent akışlarını izleme
-- 🎨 **Modern Streamlit UI** - Kullanıcı dostu arayüz
-- 🇹🇷 **Türkçe Raporlar** - Kaynaklarla desteklenmiş detaylı analiz
-- ⚡ **Paralel Tool Execution** - Birden fazla arama aynı anda
-
----
-
-## 🚀 Hızlı Başlangıç
-
-### 1. Kurulum
-
-```bash
-# Repo'yu klonla
-git clone <repo-url>
+```powershell
 cd multi_agent_search
-
-# Virtual environment oluştur
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-
-# Bağımlılıkları yükle
-pip install -r requirements.txt
+.\start.ps1
 ```
 
-### 2. API Keylerini Ayarla
+Tarayıcıda aç: http://localhost:3000
 
-`.env` dosyası oluştur:
+---
 
-```bash
-# Zorunlu
-GOOGLE_API_KEY=your_gemini_api_key
-FIRECRAWL_API_KEY=your_firecrawl_api_key
+## 🔑 API Key Ayarları
 
-# Opsiyonel (Daha fazla arama kaynağı için)
-TAVILY_API_KEY=your_tavily_api_key
-GITHUB_TOKEN=ghp_your_github_token
-LANGSMITH_API_KEY=your_langsmith_api_key
+### Multi API Key (429 Hatası Çözümü!)
 
-# Supabase (Memory için)
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_KEY=your_supabase_anon_key
+`.env` dosyasına birden fazla Gemini key ekleyebilirsiniz:
 
-# Model seçimi
-DEFAULT_MODEL=google_genai:gemini-2.5-flash
+```env
+# Çoklu key (virgülle ayrılmış) - ÖNERILEN!
+GOOGLE_API_KEYS=AIzaSy-key1,AIzaSy-key2,AIzaSy-key3
+
+# Firecrawl (zorunlu)
+FIRECRAWL_API_KEY=fc-your-key
+
+# Model
+DEFAULT_MODEL=google_genai:gemini-2.0-flash-exp
 ```
 
-### 3. Supabase Tablosunu Oluştur (Opsiyonel)
+**Nasıl çalışır?**
+1. İlk key rate limit'e takılırsa
+2. Otomatik olarak ikinci key'e geçer
+3. Tüm key'ler kullanıldıysa başa döner
 
-Eğer conversation memory istiyorsan:
+### Ollama (Sınırsız, Ücretsiz)
 
-1. [Supabase](https://supabase.com) hesabı aç
-2. Yeni proje oluştur
-3. SQL Editor'da `supabase_migration.sql` dosyasını çalıştır
-
-### 4. Çalıştır
-
-**Streamlit UI:**
 ```bash
-streamlit run src/app.py
-```
+# Kur
+winget install Ollama.Ollama
 
-**CLI (Terminal):**
-```bash
-python -m src.main "Python ile veri manipülasyonu nedir?"
-```
+# Model indir
+ollama pull llama3.2
 
-**İnteraktif Mod:**
-```bash
-python -m src.main --interactive
+# .env'de değiştir
+DEFAULT_MODEL=ollama:llama3.2
 ```
 
 ---
 
-## 📁 Proje Yapısı
+## 📁 Klasör Yapısı
 
 ```
 multi_agent_search/
 ├── src/
+│   ├── simple_copilot_backend.py  # FastAPI backend
 │   ├── agents/
-│   │   └── main_agent.py      # DeepAgent orchestration
+│   │   ├── simple_agent.py        # Hızlı mod
+│   │   ├── main_agent.py          # Standart mod
+│   │   └── multi_agent_system.py  # Derin araştırma
 │   ├── config/
-│   │   └── settings.py        # Ayarlar ve API keys
-│   ├── memory/
-│   │   └── supabase_memory.py # Conversation persistence
-│   ├── app.py                 # Streamlit UI
-│   └── main.py                # CLI entry point
-├── .env                       # API keys (gitignore'da)
-├── .env.example               # Örnek config
-├── requirements.txt           # Python dependencies
-├── supabase_migration.sql     # Database schema
-└── README.md
+│   │   └── settings.py            # Multi API key desteği
+│   └── models.py                  # LLM helpers
+├── copilotkit-ui/                 # Next.js frontend
+│   └── app/
+│       ├── page.tsx               # Ana sayfa
+│       └── components/
+│           ├── ChatInterface.tsx      # Full screen chat
+│           ├── SidebarInterface.tsx   # Sidebar chat
+│           └── PopupInterface.tsx     # Popup chat
+├── start.ps1                      # PowerShell starter
+└── requirements.txt
 ```
 
 ---
 
-## 🔧 Kullanım
+## 🎨 UI Modları
 
-### Streamlit UI
+| Mod | Açıklama |
+|-----|----------|
+| 💬 **CopilotChat** | Full screen chat |
+| 📋 **CopilotSidebar** | Dashboard + Chat sidebar |
+| 💭 **CopilotPopup** | Floating popup chat |
 
-1. `streamlit run src/app.py`
-2. Tarayıcıda `http://localhost:8501` aç
-3. Soru sor ve bekle!
+---
 
-**Özellikler:**
-- 💬 Chat interface
-- 💾 Otomatik conversation history (Supabase aktifse)
-- 🔄 Real-time status updates
-- 📋 Kaynak atıfları
+## 🛡️ 429 Rate Limit Koruması
 
-### CLI
+### Özellikler
+- ✅ **Multi API Key Rotation**: Birden fazla key arasında döner
+- ✅ **Response Caching**: Aynı sorulara cache'den yanıt
+- ✅ **Rate Limiting**: Dakikada 10 istek limiti
+- ✅ **Auto Retry**: 429 hatası alınırsa otomatik key değiştirir
 
-**Tek Soru:**
+### Cache İstatistikleri
+```
+GET http://localhost:8000/stats
+```
+
+---
+
+## 📊 API Endpoints
+
+| Endpoint | Method | Açıklama |
+|----------|--------|----------|
+| `/` | GET | Health check |
+| `/chat` | POST | Chat endpoint |
+| `/health` | GET | System health |
+| `/stats` | GET | Cache & rate limit stats |
+| `/cache` | DELETE | Cache temizle |
+
+### Örnek İstek
 ```bash
-python -m src.main "Python pandas nedir?"
+curl -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Python pandas nedir?"}'
 ```
 
-**İnteraktif Mod:**
+---
+
+## 🚀 Geliştirme
+
+### Backend
 ```bash
-python -m src.main --interactive
+cd multi_agent_search
+python -m uvicorn src.simple_copilot_backend:app --reload --port 8000
 ```
 
----
-
-## 🛠️ Yapılandırma
-
-### Model Seçimi
-
-`.env` dosyasında:
-
+### Frontend
 ```bash
-# Gemini (Önerilen)
-DEFAULT_MODEL=google_genai:gemini-2.5-flash
-
-# Ollama (Local)
-DEFAULT_MODEL=ollama:llama3.1:8b
+cd copilotkit-ui
+npm run dev
 ```
 
-### MCP Serverlar
-
-`main_agent.py` içinde otomatik olarak şunlar yüklenir:
-- **Firecrawl** - Her zaman aktif (web scraping)
-- **Tavily** - Eğer `TAVILY_API_KEY` varsa (AI search - 1000/ay ücretsiz)
-- **GitHub** - Eğer `GITHUB_TOKEN` varsa (code search - ücretsiz)
-
-### Memory (Supabase)
-
-Supabase credentials yoksa memory devre dışı kalır, uygulama normal çalışır.
-
 ---
 
-## 📊 LangSmith Tracing
+## 📦 Gereksinimler
 
-Agent akışlarını izlemek için:
-
-1. [LangSmith](https://smith.langchain.com) hesabı aç
-2. API key al
-3. `.env`'ye ekle:
-```bash
-LANGSMITH_API_KEY=your_key
+### Python
+```
+deepagents
+langgraph
+langchain
+langchain-mcp-adapters
+langchain-google-genai
+langchain-ollama
+fastapi
+uvicorn
 ```
 
-4. https://smith.langchain.com adresinde trace'leri gör
+### Node.js
+```
+next
+react
+tailwindcss
+```
 
 ---
 
-## 🧪 Örnek Sorular
+## 🎯 Yol Haritası
 
-**Genel Araştırma:**
-- "Python ile veri manipülasyonu nasıl yapılır?"
-- "LangChain ve LangGraph arasındaki farklar nelerdir?"
-- "2024'te en popüler açık kaynak LLM'ler hangileri?"
-
-**Kod/GitHub Araması:**
-- "Python pandas için en iyi GitHub projeleri"
-- "LangChain ile agent nasıl yapılır? GitHub örnekleri"
-- "FastAPI authentication örnekleri"
-
-**Database:**
-- "Supabase ile PostgreSQL nasıl kullanılır?"
+- [x] Multi API Key Rotation
+- [x] Response Caching
+- [x] Rate Limiting
+- [x] 3 UI Modu
+- [ ] Auth (Clerk)
+- [ ] Database (Supabase)
+- [ ] Billing (Stripe)
+- [ ] Deploy (Vercel + Railway)
 
 ---
 
-## 🤝 Katkıda Bulunma
-
-1. Fork yapın
-2. Feature branch oluşturun (`git checkout -b feature/amazing-feature`)
-3. Commit yapın (`git commit -m 'Add amazing feature'`)
-4. Push yapın (`git push origin feature/amazing-feature`)
-5. Pull Request açın
-
----
-
-## 📝 Lisans
-
-MIT License
-
----
-
-## 🙏 Teşekkürler
-
-- [DeepAgents](https://github.com/langchain-ai/deepagents) - Agent framework
-- [LangChain](https://langchain.com) - LLM orchestration
-- [Firecrawl](https://firecrawl.dev) - Web scraping
-- [Tavily](https://tavily.com) - AI search
-- [GitHub](https://github.com) - Code search & repositories
-- [Supabase](https://supabase.com) - Database
-- [Streamlit](https://streamlit.io) - UI framework
-
----
-
-## 📞 İletişim
-
-Sorularınız için issue açın veya PR gönderin!
-
-**Made with ❤️ using DeepAgents**
+**Made with ❤️ using DeepAgents, LangGraph & Next.js**
