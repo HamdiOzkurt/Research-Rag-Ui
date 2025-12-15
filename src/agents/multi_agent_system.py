@@ -302,7 +302,7 @@ async def coder_node(state: AgentState) -> AgentState:
         
         result = await coder.ainvoke(
             {"messages": [{"role": "user", "content": "Kod örnekleri oluştur"}]},
-            config={"recursion_limit": 2}  # Azaltıldı: 3 → 2 (rate limit için)
+            config={"recursion_limit": 20}  # Artırıldı: 2 → 20
         )
         
         code_examples = ""
@@ -343,7 +343,7 @@ async def writer_node(state: AgentState) -> AgentState:
         
         result = await writer.ainvoke(
             {"messages": [{"role": "user", "content": "Profesyonel rapor yaz"}]},
-            config={"recursion_limit": 5}  # Artırıldı: 3 → 5
+            config={"recursion_limit": 25}  # Artırıldı: 5 → 25
         )
         
         final_report = ""

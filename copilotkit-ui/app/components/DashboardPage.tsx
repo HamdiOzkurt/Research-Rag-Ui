@@ -11,8 +11,8 @@ import { listThreads } from "@/lib/api";
 type DashboardProps = {
   stats: any;
   backendStatus: string;
-  currentMode: "dashboard" | "chat" | "sidebar" | "popup";
-  onNavigate: (mode: "dashboard" | "chat" | "sidebar" | "popup") => void;
+  currentMode: "dashboard" | "chat" | "sidebar" | "popup" | "billing";
+  onNavigate: (mode: "dashboard" | "chat" | "sidebar" | "popup" | "billing") => void;
   userId?: string;
 };
 

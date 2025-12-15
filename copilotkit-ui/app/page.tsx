@@ -7,6 +7,7 @@ import ChatInterface from "./components/ChatInterface";
 import SidebarInterface from "./components/SidebarInterface";
 import PopupInterface from "./components/PopupInterface";
 import DashboardPage from "./components/DashboardPage";
+import BillingPage from "./components/BillingPage";
 import { health, stats as fetchStats } from "@/lib/api";
 import AppShell, { UIMode } from "./components/AppShell";
 
@@ -20,7 +21,7 @@ export default function Home() {
 
   useEffect(() => {
     const requested = (searchParams.get("mode") || "").toLowerCase();
-    if (requested === "dashboard" || requested === "chat" || requested === "sidebar" || requested === "popup") {
+    if (requested === "dashboard" || requested === "chat" || requested === "sidebar" || requested === "popup" || requested === "billing") {
       setMode(requested as UIMode);
     }
   }, [searchParams]);
@@ -73,6 +74,7 @@ export default function Home() {
         {mode === "chat" && <ChatInterface />}
         {mode === "sidebar" && <SidebarInterface />}
         {mode === "popup" && <PopupInterface />}
+        {mode === "billing" && <BillingPage stats={stats} />}
     </AppShell>
   );
 }

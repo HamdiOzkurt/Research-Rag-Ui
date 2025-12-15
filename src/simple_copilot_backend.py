@@ -17,11 +17,12 @@ import uuid
 import os
 
 from .agents.simple_agent import run_simple_research
-from .agents.multi_agent_system import run_multi_agent_research
+from .agents.multi_agent_system_v2 import run_multi_agent_research  # LangChain Tool Calling
 from .agents.main_agent import run_research as run_deep_research
 from .config import settings
 from .memory.supabase_memory import get_memory
 from .auth.clerk_jwt import require_user_id
+from .billing import store as billing_store
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -191,6 +192,9 @@ class ChatResponse(BaseModel):
     remaining_requests: int = 10
     thread_id: Optional[str] = None
     saved: bool = False
+    plan: Optional[str] = None
+    monthly_used: Optional[int] = None
+    monthly_limit: Optional[int] = None
 
 
 # =============================================================================
@@ -278,6 +282,27 @@ async def chat_endpoint(request: ChatRequest, user_id: str = Depends(require_use
             thread_id=thread_id,
             saved=saved,
         )
+
+    # 2.5 Monthly plan limit (SaaS)
+    sub = billing_store.get_active_subscription(user_id)
+    plan = billing_store.resolve_plan(sub.get("price_id") if sub else None)
+    monthly_used = billing_store.get_usage(user_id)
+    if monthly_used >= plan.monthly_limit:
+        return ChatResponse(
+            response=(
+                f"⚠️ Aylık limit doldu ({monthly_used}/{plan.monthly_limit}).\n\n"
+                f"Plan: {plan.name}\n"
+                "💳 Upgrade için Billing sayfasından Pro/Team seçin."
+            ),
+            success=False,
+            cached=False,
+            remaining_requests=user_rate_limiter.remaining(user_id),
+            thread_id=thread_id,
+            saved=saved,
+            plan=plan.name,
+            monthly_used=monthly_used,
+            monthly_limit=plan.monthly_limit,
+        )
     
     # 3. AI'dan yanıt al (mode'a göre agent seç)
     try:
@@ -300,6 +325,8 @@ async def chat_endpoint(request: ChatRequest, user_id: str = Depends(require_use
         # Cache'e kaydet
         if result and not is_error_text:
             cache.set(query, result)
+            # Usage: sadece gerçek model çağrısı başarılı ise say
+            monthly_used = billing_store.increment_usage(user_id)
 
         # History: assistant mesajını kaydet
         if user_id:
@@ -316,6 +343,9 @@ async def chat_endpoint(request: ChatRequest, user_id: str = Depends(require_use
             remaining_requests=user_rate_limiter.remaining(user_id),
             thread_id=thread_id,
             saved=saved,
+            plan=plan.name,
+            monthly_used=monthly_used,
+            monthly_limit=plan.monthly_limit,
         )
     
     except Exception as e:
@@ -389,13 +419,22 @@ async def delete_thread(thread_id: str, user_id: str = Depends(require_user_id))
 @app.get("/stats")
 async def stats(user_id: str = Depends(require_user_id)):
     """Cache ve rate limit istatistikleri (user bazlı)"""
+    sub = billing_store.get_active_subscription(user_id)
+    plan = billing_store.resolve_plan(sub.get("price_id") if sub else None)
+    monthly_used = billing_store.get_usage(user_id)
     return {
         "cache": cache.stats(),
         "rate_limit": {
             "max_requests_per_minute": user_rate_limiter.max_requests,
             "remaining": user_rate_limiter.remaining(user_id),
             "reset_in_seconds": user_rate_limiter.reset_time(user_id)
-        }
+        },
+        "billing": {
+            "plan": plan.name,
+            "monthly_used": monthly_used,
+            "monthly_limit": plan.monthly_limit,
+            "has_active_subscription": bool(sub),
+        },
     }
 
 

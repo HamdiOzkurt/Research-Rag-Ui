@@ -108,6 +108,17 @@ class Settings(BaseModel):
     langsmith_api_key: Optional[str] = Field(
         default_factory=lambda: os.getenv("LANGSMITH_API_KEY")
     )
+
+    # ============ Billing (Stripe) ============
+    stripe_secret_key: Optional[str] = Field(default_factory=lambda: os.getenv("STRIPE_SECRET_KEY"))
+    stripe_webhook_secret: Optional[str] = Field(default_factory=lambda: os.getenv("STRIPE_WEBHOOK_SECRET"))
+    stripe_price_id_pro: Optional[str] = Field(default_factory=lambda: os.getenv("STRIPE_PRICE_ID_PRO"))
+    stripe_price_id_team: Optional[str] = Field(default_factory=lambda: os.getenv("STRIPE_PRICE_ID_TEAM"))
+
+    # Plan limits (monthly)
+    free_monthly_requests: int = Field(default_factory=lambda: int(os.getenv("FREE_MONTHLY_REQUESTS", "50")))
+    pro_monthly_requests: int = Field(default_factory=lambda: int(os.getenv("PRO_MONTHLY_REQUESTS", "2000")))
+    team_monthly_requests: int = Field(default_factory=lambda: int(os.getenv("TEAM_MONTHLY_REQUESTS", "10000")))
     
     # ============ Model Seçimi ============
     default_model: str = Field(

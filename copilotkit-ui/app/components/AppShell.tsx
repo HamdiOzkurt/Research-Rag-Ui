@@ -10,12 +10,13 @@ import {
   MessageSquareText,
   PanelRightOpen,
   Sparkles,
+  CreditCard,
   ChevronLeft,
   ChevronRight,
   Circle,
 } from "lucide-react";
 
-export type UIMode = "dashboard" | "chat" | "sidebar" | "popup";
+export type UIMode = "dashboard" | "chat" | "sidebar" | "popup" | "billing";
 
 type Props = {
   mode: UIMode;
@@ -134,6 +135,14 @@ export default function AppShell({
                 <Sparkles className="h-4 w-4" />
                 {!collapsed && "Popup"}
               </Button>
+              <Button
+                variant="ghost"
+                className={navBtnClass(mode === "billing")}
+                onClick={() => setMode("billing")}
+              >
+                <CreditCard className="h-4 w-4" />
+                {!collapsed && "Billing"}
+              </Button>
             </div>
           </nav>
 
@@ -180,7 +189,9 @@ export default function AppShell({
                     ? "Chat"
                     : mode === "sidebar"
                     ? "Sidebar Chat"
-                    : "Popup"}
+                    : mode === "popup"
+                    ? "Popup"
+                    : "Billing"}
                 </div>
                 <div className="text-xs text-muted-foreground truncate">
                   {userName ? userName : "Signed in"} • Backend: {statusText}
