@@ -15,17 +15,14 @@ logger = logging.getLogger(__name__)
 
 # ============ LANGSMITH TRACING ============
 def setup_langsmith():
-    """LangSmith tracing'i aktifleştir"""
+    """LangSmith tracing'i aktifleştir - Her çağrıda proje ayarlanır"""
     if settings.langsmith_api_key:
-        os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
-        os.environ.setdefault("LANGCHAIN_PROJECT", "ai-research-simple")
+        os.environ["LANGCHAIN_TRACING_V2"] = "true"
+        os.environ["LANGCHAIN_PROJECT"] = "ai-research-simple"
         os.environ["LANGCHAIN_API_KEY"] = settings.langsmith_api_key
-        logger.info("[LANGSMITH] Tracing aktif: ai-research-simple")
+        logger.info("[LANGSMITH] Simple Agent aktif: https://smith.langchain.com/o/personal/projects/p/ai-research-simple")
         return True
     return False
-
-# Başlangıçta çalıştır
-_langsmith_enabled = setup_langsmith()
 
 SIMPLE_PROMPT = """Sen bir Türkçe Araştırma Asistanısın (DeepAgent).
 
@@ -74,6 +71,9 @@ async def run_simple_research(query: str, verbose: bool = True, max_retries: int
         verbose: Log göster
         max_retries: 429 hatası için max deneme
     """
+    # LangSmith'i bu mod için ayarla
+    setup_langsmith()
+    
     mcp_client = None
     
     for attempt in range(max_retries):

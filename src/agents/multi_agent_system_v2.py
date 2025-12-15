@@ -19,11 +19,15 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ============ LANGSMITH ============
-if settings.langsmith_api_key:
-    os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
-    os.environ.setdefault("LANGCHAIN_PROJECT", "ai-research-multi-agent-v2")
-    os.environ["LANGCHAIN_API_KEY"] = settings.langsmith_api_key
-    logger.info("[LANGSMITH] Multi-Agent v2 aktif")
+def setup_langsmith():
+    """LangSmith tracing'i multi-agent için aktifleştir"""
+    if settings.langsmith_api_key:
+        os.environ["LANGCHAIN_TRACING_V2"] = "true"
+        os.environ["LANGCHAIN_PROJECT"] = "ai-research-multi-agent-v2"
+        os.environ["LANGCHAIN_API_KEY"] = settings.langsmith_api_key
+        logger.info("[LANGSMITH] Multi-Agent v2 aktif - https://smith.langchain.com/o/personal/projects/p/ai-research-multi-agent-v2")
+        return True
+    return False
 
 
 # =============================================================================
@@ -35,6 +39,32 @@ _researcher_agent = None
 _coder_agent = None
 _writer_agent = None
 _mcp_tools = None
+
+
+def _get_tool_calling_model():
+    """Multi-Agent için tool calling optimize Ollama model
+    
+    qwen2.5:7b - Tool calling için en iyi ücretsiz Ollama modeli
+    Alternatifler: mistral:7b, llama3.1:8b
+    
+    .env'de MULTI_AGENT_MODEL ile override edilebilir
+    """
+    from langchain_ollama import ChatOllama
+    
+    # Tool calling için optimize model
+    tool_model = os.getenv("MULTI_AGENT_MODEL", "qwen2.5:7b")
+    
+    try:
+        model = ChatOllama(
+            model=tool_model,
+            base_url=settings.ollama_base_url,
+            temperature=0.7,
+        )
+        logger.info(f"[MODEL] Multi-Agent: {tool_model} (tool calling optimized)")
+        return model
+    except Exception as e:
+        logger.warning(f"[WARN] {tool_model} init hatası: {e}, default'a fallback")
+        return get_llm_model()
 
 
 async def _init_agents():
@@ -65,27 +95,29 @@ async def _init_agents():
         logger.warning(f"[WARN] MCP başlatılamadı: {e}")
         _mcp_tools = []
     
-    # Model
-    model = get_llm_model()
+    # Model - Multi-Agent için tool calling optimize (qwen2.5 default)
+    model = _get_tool_calling_model()
     
     # 1. RESEARCHER AGENT (DeepAgent with Planning)
     researcher_prompt = """Sen bir Web Araştırma Uzmanısın (DeepAgent).
 
 🛠️ Tool'ların:
 - write_todos: Araştırma planı yap
-- firecrawl_*: Web scraping
+- firecrawl_search: Web araması
 - read_file/write_file: Araştırma notları kaydet
 - task: Alt araştırma için subagent spawn et
 
 📋 İş Akışı:
 1. write_todos: Araştırma planı yaz
-2. Firecrawl ile araştır
+2. firecrawl_search ile araştır
+   Örnek argüman: {"query": "...", "sources": [{"source": "google"}], "limit": 3, "lang": "en", "country": "us", "scrapeOptions": {"formats": ["markdown"], "onlyMainContent": true}}
 3. write_file: Bulguları "research_notes.md" dosyasına kaydet
 4. Özet döndür (detaylar dosyada)
 
 ⚡ Önemli: Uzun sonuçları dosyaya kaydet, sadece özet döndür."""
     
-    search_tools = [t for t in _mcp_tools if 'search' in t.name.lower() or 'scrape' in t.name.lower()][:2]
+    # Firecrawl MCP tool'larını tekrar etkinleştir (yalnızca search)
+    search_tools = [t for t in _mcp_tools if t.name == "firecrawl_search"]
     _researcher_agent = create_deep_agent(
         model=model,
         tools=search_tools,
@@ -176,9 +208,16 @@ async def researcher_tool(query: str) -> str:
     logger.info(f"[RESEARCHER] Çalışıyor: {query[:50]}...")
     
     try:
+        # Firecrawl schema uyumu için ipucu: sources bir array of object olmalı.
+        hint = (
+            'Firecrawl argüman örneği: {"query": "%s", "sources": [{"source":"google"}], '
+            '"limit": 3, "lang": "en", "country": "us", '
+            '"scrapeOptions": {"formats": ["markdown"], "onlyMainContent": true}}'
+        ) % query
+
         result = await _researcher_agent.ainvoke(
-            {"messages": [{"role": "user", "content": query}]},
-            config={"recursion_limit": 10}
+            {"messages": [{"role": "user", "content": f"{query}\n\n{hint}"}]},
+            config={"recursion_limit": 20}
         )
         
         # Son mesajı al
@@ -218,7 +257,7 @@ async def coder_tool(task: str, research_context: str = "") -> str:
     try:
         result = await _coder_agent.ainvoke(
             {"messages": [{"role": "user", "content": prompt}]},
-            config={"recursion_limit": 10}
+            config={"recursion_limit": 25}  # Kod yazma iteratif olabilir
         )
         
         response = ""
@@ -263,7 +302,7 @@ Profesyonel Markdown rapor oluştur."""
     try:
         result = await _writer_agent.ainvoke(
             {"messages": [{"role": "user", "content": prompt}]},
-            config={"recursion_limit": 10}
+            config={"recursion_limit": 15}  # Rapor yazma genelde hızlı
         )
         
         response = ""
@@ -297,67 +336,76 @@ SUPERVISOR_PROMPT = """Sen bir Araştırma Yöneticisisin (DeepAgent Supervisor)
 - task: Subagent spawn et
 
 🧑‍💼 Subagent Tool'lar:
-- researcher: Web araştırması (DeepAgent)
+- researcher: Web araştırması (DeepAgent + MCP/Firecrawl)
 - coder: Kod örnekleri (DeepAgent)
 - writer: Final rapor (DeepAgent)
 
-📋 İş Akışı:
-1. write_todos: Genel plan yap
-   ["Soruyu analiz et", "Researcher çağır", "Coder çağır", "Writer çağır"]
-2. researcher çağır → "research_notes.md" dosyasına kaydedecek
-3. coder çağır → "code_examples.py" dosyasına kaydedecek
-4. writer çağır → Her iki dosyayı okuyup "final_report.md" oluşturacak
-5. read_file: "final_report.md" oku ve döndür
+🚨 ZORUNLU KURAL:
+HER SORUDA MUTLAKA ŞUNU YAP:
+1. researcher tool'unu çağır (web'den güncel bilgi topla)
+2. coder tool'unu çağır (kod örnekleri oluştur)
+3. writer tool'unu çağır (final rapor yaz)
 
-⚡ Strateji:
-- Bilgi → researcher
-- Kod → researcher + coder
-- Rapor → writer (her zaman)
+❌ ASLA base knowledge'ını kullanma
+❌ ASLA researcher'ı atlama
+✅ HER ZAMAN 3 tool'u sırayla çağır
+
+📋 İş Akışı:
+1. write_todos: ["Web araştır", "Kod yaz", "Rapor hazırla"]
+2. researcher(query) → MCP/Firecrawl ile web'den araştır
+3. coder(task, research_context) → Araştırma sonuçlarını kullanarak kod yaz
+4. writer(research, code, query) → Final raporu oluştur
 
 💡 Önemli:
+- Researcher MUTLAKA çağrılmalı (MCP tool'ları orada)
 - Her agent kendi dosya sistemini kullanır
-- Dosyalar context overflow'u önler
 - Subagent'lar otomatik planning yapar"""
 
 
 async def run_multi_agent_research(query: str, verbose: bool = True) -> str:
     """
-    LangChain Tool Calling Pattern ile Multi-Agent
+    Sequential Multi-Agent Pipeline
     
-    Supervisor → tool'ları çağırır → final rapor döner
+    Ollama tool calling uyumsuzluğu nedeniyle sıralı çalıştırma:
+    Researcher → Coder → Writer
+    
+    Bu yaklaşım:
+    - Her agent garantili çağrılır
+    - MCP tool'lar kesinlikle kullanılır
+    - LangSmith'te tüm trace'ler görünür
     """
+    # LangSmith'i bu mod için ayarla
+    setup_langsmith()
+    
     await _init_agents()
     
-    logger.info(f"[SUPERVISOR] Başlatılıyor: {query[:50]}...")
+    logger.info(f"[PIPELINE] Başlatılıyor: {query[:50]}...")
     
     try:
-        # Supervisor Agent (tool'larla birlikte)
-        model = get_llm_model()
-        supervisor = create_deep_agent(
-            model=model,
-            tools=[researcher_tool, coder_tool, writer_tool],
-            system_prompt=SUPERVISOR_PROMPT,
-        )
+        # 1. RESEARCHER - Web'den bilgi topla
+        logger.info("[1/3] Researcher başlıyor...")
+        research_result = await researcher_tool.ainvoke(query)
+        logger.info(f"[1/3] Researcher tamamlandı: {len(research_result)} karakter")
         
-        # Supervisor'ı çalıştır
-        result = await supervisor.ainvoke(
-            {"messages": [{"role": "user", "content": query}]},
-            config={"recursion_limit": 30}  # Supervisor + her tool çağrısı için
-        )
+        # 2. CODER - Kod örnekleri oluştur
+        logger.info("[2/3] Coder başlıyor...")
+        code_result = await coder_tool.ainvoke({
+            "task": query,
+            "research_context": research_result[:2000]  # Context overflow önle
+        })
+        logger.info(f"[2/3] Coder tamamlandı: {len(code_result)} karakter")
         
-        # Final response'u al
-        final_response = ""
-        if "messages" in result:
-            for msg in reversed(result["messages"]):
-                if hasattr(msg, 'content') and isinstance(msg.content, str) and msg.content.strip():
-                    final_response = msg.content.strip()
-                    break
+        # 3. WRITER - Final rapor oluştur
+        logger.info("[3/3] Writer başlıyor...")
+        final_report = await writer_tool.ainvoke({
+            "research": research_result[:3000],
+            "code": code_result[:2000],
+            "query": query
+        })
+        logger.info(f"[3/3] Writer tamamlandı: {len(final_report)} karakter")
         
-        if not final_response:
-            return f"# {query}\n\nSonuç alınamadı."
-        
-        logger.info("[OK] Multi-Agent araştırma tamamlandı!")
-        return final_response
+        logger.info("[OK] Multi-Agent pipeline tamamlandı!")
+        return final_report
     
     except Exception as e:
         error_msg = f"Multi-Agent hatası: {str(e)}"

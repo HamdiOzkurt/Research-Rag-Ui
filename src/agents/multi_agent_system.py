@@ -22,16 +22,14 @@ logger = logging.getLogger(__name__)
 
 # ============ LANGSMITH TRACING ============
 def setup_langsmith():
-    """LangSmith tracing'i aktifleştir"""
+    """LangSmith tracing'i aktifleştir - Legacy multi-agent için"""
     if settings.langsmith_api_key:
-        os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
-        os.environ.setdefault("LANGCHAIN_PROJECT", "ai-research-multi-agent")
+        os.environ["LANGCHAIN_TRACING_V2"] = "true"
+        os.environ["LANGCHAIN_PROJECT"] = "ai-research-multi-agent-legacy"
         os.environ["LANGCHAIN_API_KEY"] = settings.langsmith_api_key
-        logger.info("[LANGSMITH] Tracing aktif: ai-research-multi-agent")
+        logger.info("[LANGSMITH] Multi-Agent (legacy) aktif: https://smith.langchain.com/o/personal/projects/p/ai-research-multi-agent-legacy")
         return True
     return False
-
-_langsmith_enabled = setup_langsmith()
 
 
 # =============================================================================

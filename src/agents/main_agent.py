@@ -6,6 +6,7 @@ FINAL WORKING VERSION
 import asyncio
 import os
 import time
+import logging
 from typing import Optional
 
 from deepagents import create_deep_agent
@@ -14,13 +15,17 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 
 from ..config import settings
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 # ============ LANGSMITH ============
 
 def setup_langsmith():
     """LangSmith tracing'i etkinleştirir"""
     os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
-    os.environ.setdefault("LANGCHAIN_PROJECT", "multi-agent-search")
+    os.environ.setdefault("LANGCHAIN_PROJECT", "ai-research-deep")
+    logger.info("[LANGSMITH] Deep Research aktif: https://smith.langchain.com/o/personal/projects/p/ai-research-deep")
     if settings.langsmith_api_key:
         os.environ["LANGCHAIN_API_KEY"] = settings.langsmith_api_key
         print("[OK] LangSmith tracing aktif!")
@@ -243,8 +248,6 @@ def sanitize_tool_schema(tool):
 async def create_research_agent():
     """Firecrawl MCP + DeepAgent oluşturur"""
     
-    setup_langsmith()
-    
     if not settings.firecrawl_api_key:
         raise ValueError("[ERROR] FIRECRAWL_API_KEY gerekli! .env dosyasını kontrol edin.")
     
@@ -357,6 +360,9 @@ async def create_research_agent():
 
 async def run_research(question: str, verbose: bool = True) -> str:
     """Araştırma agent'ını çalıştırır"""
+    
+    # LangSmith'i bu mod için ayarla
+    setup_langsmith()
     
     if verbose:
         print("\n" + "=" * 70)
