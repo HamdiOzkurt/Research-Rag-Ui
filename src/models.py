@@ -12,6 +12,19 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
+# GROQ MODEL ALIASES (deprecations)
+# =============================================================================
+
+# Groq sometimes decommissions older model IDs. Map known deprecated IDs to
+# recommended replacements to keep demos running.
+GROQ_MODEL_ALIASES = {
+    # Per Groq deprecations: llama-3.1-70b-versatile -> llama-3.3-70b-versatile
+    "llama-3.1-70b-versatile": "llama-3.3-70b-versatile",
+    "llama-3.1-70b-specdec": "llama-3.3-70b-specdec",
+}
+
+
+# =============================================================================
 # DATA MODELS
 # =============================================================================
 
@@ -70,6 +83,24 @@ def get_llm_model(retry_on_failure: bool = True, max_retries: int = 3):
             logger.info(f"[MODEL] Model: {model_name} (Key {key_index}/{key_count})")
         else:
             raise ValueError("Google API key not available")
+
+    elif provider == "groq":
+        api_key = getattr(settings, "groq_api_key", None)
+        if api_key:
+            os.environ["GROQ_API_KEY"] = api_key
+            resolved_model_name = GROQ_MODEL_ALIASES.get(model_name, model_name)
+            if resolved_model_name != model_name:
+                logger.warning(
+                    f"[MODEL] Groq model '{model_name}' deprecated; using '{resolved_model_name}'"
+                )
+            logger.info(f"[MODEL] Model: {resolved_model_name} (Groq)")
+            try:
+                from langchain_groq import ChatGroq
+                return ChatGroq(model=resolved_model_name, api_key=api_key, temperature=0.3)
+            except Exception as e:
+                logger.warning(f"[WARN] ChatGroq init failed, falling back to init_chat_model: {e}")
+        else:
+            raise ValueError("Groq API key not available")
     
     elif provider == "ollama":
         os.environ["OLLAMA_HOST"] = settings.ollama_base_url
@@ -123,28 +154,43 @@ def sanitize_tool_schema(tool):
     # Firecrawl MCP ise `[{ "source": "google" }]` bekliyor.
     try:
         if getattr(tool, "name", "") == "firecrawl_search":
-            original_ainvoke = getattr(tool, "ainvoke", None)
-
-            if original_ainvoke is not None and callable(original_ainvoke):
-
-                async def patched_ainvoke(
-                    input_data, *args, _orig_ainvoke=original_ainvoke, **kwargs
-                ):
-                    # input_data genelde dict oluyor; yine de korumalı git
-                    if isinstance(input_data, dict) and "sources" in input_data:
-                        sources_val = input_data["sources"]
-                        # Eğer ["google", "news"] gibi string list ise dönüştür
-                        if isinstance(sources_val, list) and sources_val:
-                            if isinstance(sources_val[0], str):
-                                input_data["sources"] = [
-                                    {"source": s} for s in sources_val
-                                ]
-                    return await _orig_ainvoke(input_data, *args, **kwargs)
-
-                tool.ainvoke = patched_ainvoke
-    except Exception:
+            # Her iki invoke metodunu da patch'le
+            for method_name in ["ainvoke", "invoke", "_run", "run"]:
+                original_method = getattr(tool, method_name, None)
+                
+                if original_method is not None and callable(original_method):
+                    import asyncio
+                    
+                    def _fix_sources(input_data):
+                        """Sources parametresini düzelt"""
+                        if isinstance(input_data, dict) and "sources" in input_data:
+                            sources_val = input_data["sources"]
+                            # Eğer ["google", "news"] gibi string list ise dönüştür
+                            if isinstance(sources_val, list) and sources_val:
+                                if isinstance(sources_val[0], str):
+                                    input_data["sources"] = [
+                                        {"source": s} for s in sources_val
+                                    ]
+                        return input_data
+                    
+                    if method_name.startswith("a"):  # async method
+                        async def patched_async(
+                            input_data, *args, _orig=original_method, **kwargs
+                        ):
+                            input_data = _fix_sources(input_data)
+                            return await _orig(input_data, *args, **kwargs)
+                        setattr(tool, method_name, patched_async)
+                    else:  # sync method
+                        def patched_sync(
+                            input_data, *args, _orig=original_method, **kwargs
+                        ):
+                            input_data = _fix_sources(input_data)
+                            return _orig(input_data, *args, **kwargs)
+                        setattr(tool, method_name, patched_sync)
+    except Exception as e:
         # Bu yardımcı fonksiyon, hata yüzünden tüm agent'ı patlatmamalı.
-        # Hata olursa orijinal tool olduğu gibi kullanılır.
+        import logging
+        logging.getLogger(__name__).warning(f"[WARN] Tool patch failed for {getattr(tool, 'name', 'unknown')}: {e}")
         pass
 
     return tool

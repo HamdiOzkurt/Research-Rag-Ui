@@ -14,7 +14,9 @@ logger = logging.getLogger(__name__)
 
 # .env dosyasını yükle
 env_path = Path(__file__).parent.parent.parent / ".env"
-load_dotenv(env_path)
+# Not: StatReload / restart sırasında process env değerleri kalabiliyor.
+# override=True ile .env değişikliklerinin anında etkili olmasını sağlarız.
+load_dotenv(env_path, override=True)
 
 
 class Settings(BaseModel):
@@ -95,6 +97,11 @@ class Settings(BaseModel):
     tavily_api_key: Optional[str] = Field(
         default_factory=lambda: os.getenv("TAVILY_API_KEY")
     )
+
+    # ============ Groq (LLM Provider) ============
+    groq_api_key: Optional[str] = Field(
+        default_factory=lambda: os.getenv("GROQ_API_KEY")
+    )
     
     # ============ Database ============
     supabase_url: Optional[str] = Field(
@@ -156,6 +163,9 @@ class Settings(BaseModel):
                 "count": len(self.google_api_keys),
                 "active_index": self._current_key_index + 1
             },
+            "groq": {
+                "available": bool(getattr(self, "groq_api_key", None)),
+            },
             "ollama_local": self._check_ollama(),
             "firecrawl": bool(self.firecrawl_api_key),
             "tavily": bool(self.tavily_api_key),
@@ -178,6 +188,10 @@ class Settings(BaseModel):
         # Gemini kontrolü
         if provider == "google_genai" and self.google_api_key:
             return self.default_model
+
+        # Groq kontrolü
+        if provider == "groq" and getattr(self, "groq_api_key", None):
+            return self.default_model
         
         # Ollama kontrolü
         if provider == "ollama" and self._check_ollama():
@@ -188,11 +202,16 @@ class Settings(BaseModel):
         
         if sec_provider == "google_genai" and self.google_api_key:
             return self.secondary_model
+
+        if sec_provider == "groq" and getattr(self, "groq_api_key", None):
+            return self.secondary_model
         
         if sec_provider == "ollama" and self._check_ollama():
             return self.secondary_model
         
-        raise ValueError("Hiçbir LLM kullanılamıyor! GOOGLE_API_KEY(S) veya Ollama kurulumu gerekli.")
+        raise ValueError(
+            "Hiçbir LLM kullanılamıyor! GROQ_API_KEY veya GOOGLE_API_KEY(S) veya Ollama kurulumu gerekli."
+        )
 
 
 # Global settings instance

@@ -1,22 +1,19 @@
 'use client'
 
 import { ReactNode, useMemo, useState } from "react";
-import { UserButton } from "@clerk/nextjs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
   LayoutDashboard,
   MessageSquareText,
-  PanelRightOpen,
-  Sparkles,
-  CreditCard,
   ChevronLeft,
   ChevronRight,
   Circle,
+  Sparkles,
 } from "lucide-react";
 
-export type UIMode = "dashboard" | "chat" | "sidebar" | "popup" | "billing";
+export type UIMode = "dashboard" | "chat";
 
 type Props = {
   mode: UIMode;
@@ -40,7 +37,6 @@ export default function AppShell({
     [
       "w-full justify-start gap-2",
       collapsed ? "px-2" : "",
-      // keep sidebar consistently dark (do NOT rely on shadcn `secondary` which is light in :root)
       "text-slate-200 hover:text-white hover:bg-slate-900/60",
       active ? "bg-slate-900/80 text-white shadow-inner" : "",
       "focus-visible:ring-2 focus-visible:ring-slate-700 focus-visible:ring-offset-0",
@@ -61,7 +57,7 @@ export default function AppShell({
   return (
     <div className="h-screen w-full bg-muted/30 text-foreground">
       <div className="flex h-full">
-        {/* Left sidebar (CopilotKit-docs style) */}
+        {/* Left sidebar */}
         <aside
           className={[
             "h-full shrink-0 border-r bg-slate-950 text-slate-50",
@@ -117,31 +113,7 @@ export default function AppShell({
                 onClick={() => setMode("chat")}
               >
                 <MessageSquareText className="h-4 w-4" />
-                {!collapsed && "Chat"}
-              </Button>
-              <Button
-                variant="ghost"
-                className={navBtnClass(mode === "sidebar")}
-                onClick={() => setMode("sidebar")}
-              >
-                <PanelRightOpen className="h-4 w-4" />
-                {!collapsed && "Sidebar Chat"}
-              </Button>
-              <Button
-                variant="ghost"
-                className={navBtnClass(mode === "popup")}
-                onClick={() => setMode("popup")}
-              >
-                <Sparkles className="h-4 w-4" />
-                {!collapsed && "Popup"}
-              </Button>
-              <Button
-                variant="ghost"
-                className={navBtnClass(mode === "billing")}
-                onClick={() => setMode("billing")}
-              >
-                <CreditCard className="h-4 w-4" />
-                {!collapsed && "Billing"}
+                {!collapsed && "Chat (CopilotKit)"}
               </Button>
             </div>
           </nav>
@@ -177,33 +149,21 @@ export default function AppShell({
           </div>
         </aside>
 
-        {/* Main */}
+        {/* Main content */}
         <main className="flex h-full min-w-0 flex-1 flex-col">
           <header className="h-14 border-b bg-background px-4">
             <div className="flex h-full items-center justify-between">
               <div className="min-w-0">
                 <div className="truncate text-sm font-medium">
-                  {mode === "dashboard"
-                    ? "Dashboard"
-                    : mode === "chat"
-                    ? "Chat"
-                    : mode === "sidebar"
-                    ? "Sidebar Chat"
-                    : mode === "popup"
-                    ? "Popup"
-                    : "Billing"}
+                  {mode === "dashboard" ? "Dashboard" : "CopilotKit Chat"}
                 </div>
                 <div className="text-xs text-muted-foreground truncate">
-                  {userName ? userName : "Signed in"} • Backend: {statusText}
+                  {userName || "Demo User"} • Backend: {statusText}
                 </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <UserButton afterSignOutUrl="/sign-in" />
               </div>
             </div>
           </header>
-
-          <div className="flex-1 min-h-0">{children}</div>
+          <div className="flex-1 overflow-hidden">{children}</div>
         </main>
       </div>
     </div>

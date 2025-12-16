@@ -10,6 +10,9 @@
   },
   "dependencies": {
     "@clerk/nextjs": "^6.36.2",
+    "@copilotkit/react-core": "^1.50.0",
+    "@copilotkit/react-textarea": "^1.50.0",
+    "@copilotkit/react-ui": "^1.50.0",
     "@radix-ui/react-avatar": "^1.1.11",
     "@radix-ui/react-separator": "^1.1.8",
     "@radix-ui/react-slot": "^1.2.4",
@@ -19,6 +22,9 @@
     "next": "14.2.25",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.4.0",
     "tailwindcss-animate": "^1.0.7"
   },

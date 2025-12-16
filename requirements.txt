@@ -4,6 +4,7 @@ langchain
 langchain-mcp-adapters
 langchain-google-genai
 langchain-ollama
+langchain-groq
 mcp
 python-dotenv
 pydantic

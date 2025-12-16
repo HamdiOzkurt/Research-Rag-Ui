@@ -24,41 +24,35 @@ def setup_langsmith():
         return True
     return False
 
-SIMPLE_PROMPT = """Sen bir Türkçe Araştırma Asistanısın (DeepAgent).
+SIMPLE_PROMPT = """Sen bir Türkçe Araştırma Asistanısın. Kullanıcının sorusuna hızlı ve öz bir şekilde cevap ver.
 
-🛠️ Kullanılabilir Tool'lar:
-- write_todos: Görev planı oluştur
-- read_file/write_file/edit_file/ls: Dosya sistemi (context yönetimi)
-- task: Subagent spawn et (karmaşık alt görevler için)
-- firecrawl_*: Web scraping araçları
+📄 Cevap Formatı (Markdown):
+# [Konu Başlığı]
 
-📋 İş Akışı:
-1. write_todos ile plan yap:
-   - ["Soruyu analiz et", "Web araştırması", "Rapor yaz"]
-2. Araştırma yap (Firecrawl ile)
-3. Büyük sonuçları write_file ile kaydet (context overflow önle)
-4. Gerekirse task ile subagent'a iş ver
-5. Final rapor oluştur
+## Genel Bakış
+[2-3 paragraf ile açıkla]
 
-📄 Rapor Formatı:
-# 📊 [Başlık]
+## Ana Özellikler / Kavramlar
+- **Özellik 1**: Açıklama
+- **Özellik 2**: Açıklama
+- **Özellik 3**: Açıklama
 
-## 🎯 Özet
-[2-3 cümle]
+## Kullanım / Örnekler
+[Kısa kod örneği veya kullanım senaryosu - gerekirse]
 
-## 📖 Detaylar
-[Madde madde]
+## Önemli Noktalar
+- Nokta 1
+- Nokta 2
+- Nokta 3
 
-## 💡 Önemli Noktalar
-- [Nokta 1-3]
+---
 
-## 🔗 Kaynaklar
-[Linkler]
-
-⚡ Önemli:
-- Her zaman write_todos ile başla
-- Uzun araştırma sonuçlarını write_file ile kaydet
-- Karmaşık görevleri task ile subagent'a delege et
+**Kurallar:**
+- Direkt cevap ver (tool kullanmadan mümkünse)
+- Kısa, öz ve anlaşılır Türkçe kullan
+- Web araması gerektiren güncel sorularda firecrawl tool'unu kullanabilirsin
+- Emoji kullanma (token israfı)
+- Minimum 300-500 kelime, maksimum 800 kelime
 """
 
 
@@ -82,6 +76,13 @@ async def run_simple_research(query: str, verbose: bool = True, max_retries: int
                 key_info = f"(Key {settings._current_key_index + 1}/{len(settings.google_api_keys)})" if settings.google_api_keys else ""
                 logger.info(f"[FAST] Araştırma başlatılıyor {key_info}...")
             
+            # Status: Initializing
+            yield {
+                "status": "initializing",
+                "message": "Agent başlatılıyor...",
+                "agent": "simple"
+            }
+            
             # MCP client
             mcp_servers = {
                 "firecrawl": {
@@ -101,16 +102,24 @@ async def run_simple_research(query: str, verbose: bool = True, max_retries: int
             # Agent oluştur
             model = get_llm_model()
             # deepagents venv sürümü: `system_prompt` kullanır (instructions değil)
+            # Simple mode: minimal tools to avoid recursion (direkt LLM response tercih et)
             agent = create_deep_agent(
                 model=model,
-                tools=mcp_tools[:2],  # Sadece ilk 2 tool (hızlı olması için)
+                tools=[],  # No tools for fastest response
                 system_prompt=SIMPLE_PROMPT,
             )
+            
+            # Status: Researching
+            yield {
+                "status": "researching",
+                "message": "Araştırma yapılıyor...",
+                "agent": "simple"
+            }
             
             # Çalıştır
             result = await agent.ainvoke(
                 {"messages": [{"role": "user", "content": query}]},
-                config={"recursion_limit": 5}
+                config={"recursion_limit": 25}
             )
             
             # Sonucu çıkar
@@ -132,9 +141,20 @@ async def run_simple_research(query: str, verbose: bool = True, max_retries: int
             
             if final_response:
                 logger.info("[OK] Araştırma tamamlandı")
-                return final_response
+                yield {
+                    "status": "done",
+                    "message": "Araştırma tamamlandı",
+                    "agent": "simple",
+                    "content": final_response
+                }
+                return
             
-            return "Araştırma sonucu alınamadı."
+            yield {
+                "status": "done",
+                "message": "Araştırma sonucu alınamadı",
+                "agent": "simple",
+                "content": "Araştırma sonucu alınamadı."
+            }
         
         except Exception as e:
             error_msg = str(e)
@@ -159,7 +179,12 @@ async def run_simple_research(query: str, verbose: bool = True, max_retries: int
                     await asyncio.sleep(2)
                     continue
                 else:
-                    return f"⚠️ Tüm API key'ler rate limit'e takıldı. Lütfen biraz bekleyin veya Ollama kullanın."
+                    yield {
+                        "status": "error",
+                        "message": "Tüm API key'ler rate limit'e takıldı",
+                        "content": "⚠️ Tüm API key'ler rate limit'e takıldı. Lütfen biraz bekleyin veya Ollama kullanın."
+                    }
+                    return
 
             # Geçersiz API key (Gemini)
             if (
@@ -174,16 +199,23 @@ async def run_simple_research(query: str, verbose: bool = True, max_retries: int
                     await asyncio.sleep(1)
                     continue
 
-                return (
-                    "[ERROR] Google Gemini API key geçersiz.\n\n"
-                    "[OK] Çözüm:\n"
-                    "- `multi_agent_search/.env` içine geçerli key girin:\n"
-                    "  `GOOGLE_API_KEYS=AIza...` (virgülle birden fazla da olabilir)\n"
-                    "- Backend'i yeniden başlatın.\n\n"
-                    "Alternatif: Lokal ve ücretsiz çalıştırmak için `DEFAULT_MODEL=ollama:llama3.2` kullanın."
-                )
+                yield {
+                    "status": "error",
+                    "message": "Google Gemini API key geçersiz",
+                    "content": "[ERROR] Google Gemini API key geçersiz. .env dosyasını kontrol edin."
+                }
+                return
             
             # Diğer hatalar
-            return f"[ERROR] Hata: {error_msg}"
+            yield {
+                "status": "error",
+                "message": f"❌ Hata: {error_msg}",
+                "content": f"[ERROR] Hata: {error_msg}"
+            }
+            return
     
-    return "[ERROR] Maksimum deneme sayısına ulaşıldı."
+    yield {
+        "status": "error",
+        "message": "❌ Maksimum deneme sayısına ulaşıldı",
+        "content": "[ERROR] Maksimum deneme sayısına ulaşıldı."
+    }

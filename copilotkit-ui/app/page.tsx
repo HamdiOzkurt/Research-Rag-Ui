@@ -2,26 +2,20 @@
 
 import { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
-import { useAuth, useUser } from "@clerk/nextjs";
-import ChatInterface from "./components/ChatInterface";
-import SidebarInterface from "./components/SidebarInterface";
-import PopupInterface from "./components/PopupInterface";
+import CopilotChatInterface from "./components/CopilotChatInterface";
 import DashboardPage from "./components/DashboardPage";
-import BillingPage from "./components/BillingPage";
 import { health, stats as fetchStats } from "@/lib/api";
 import AppShell, { UIMode } from "./components/AppShell";
 
 export default function Home() {
-  const [mode, setMode] = useState<UIMode>("dashboard");
+  const [mode, setMode] = useState<UIMode>("chat"); // Default to chat (CopilotKit)
   const [backendStatus, setBackendStatus] = useState<"checking" | "online" | "offline">("checking");
   const [stats, setStats] = useState<any>(null);
-  const { user, isLoaded } = useUser();
-  const { getToken } = useAuth();
   const searchParams = useSearchParams();
 
   useEffect(() => {
     const requested = (searchParams.get("mode") || "").toLowerCase();
-    if (requested === "dashboard" || requested === "chat" || requested === "sidebar" || requested === "popup" || requested === "billing") {
+    if (requested === "dashboard" || requested === "chat") {
       setMode(requested as UIMode);
     }
   }, [searchParams]);
@@ -31,8 +25,7 @@ export default function Home() {
       try {
         await health();
         setBackendStatus("online");
-        const token = await getToken();
-        setStats(await fetchStats(token));
+        setStats(await fetchStats());
       } catch {
         setBackendStatus("offline");
       }
@@ -43,38 +36,24 @@ export default function Home() {
     return () => clearInterval(interval);
   }, []);
 
-  if (!isLoaded) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-background">
-        <div className="text-center">
-          <div className="w-10 h-10 border-2 border-slate-300 border-t-slate-900 rounded-full animate-spin mx-auto mb-3"></div>
-          <p className="text-sm text-muted-foreground">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <AppShell
       mode={mode}
       setMode={setMode}
       backendStatus={backendStatus}
       stats={stats}
-      userName={(user?.firstName || user?.username) ?? null}
+      userName="Demo User"
     >
-        {mode === "dashboard" && (
-          <DashboardPage
-            stats={stats}
-            backendStatus={backendStatus}
-            currentMode={mode}
-            onNavigate={setMode}
-            userId={user?.id}
-          />
-        )}
-        {mode === "chat" && <ChatInterface />}
-        {mode === "sidebar" && <SidebarInterface />}
-        {mode === "popup" && <PopupInterface />}
-        {mode === "billing" && <BillingPage stats={stats} />}
+      {mode === "dashboard" && (
+        <DashboardPage
+          stats={stats}
+          backendStatus={backendStatus}
+          currentMode={mode}
+          onNavigate={setMode}
+          userId="demo-user"
+        />
+      )}
+      {mode === "chat" && <CopilotChatInterface />}
     </AppShell>
   );
 }
