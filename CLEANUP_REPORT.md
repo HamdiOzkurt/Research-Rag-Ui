@@ -68,7 +68,48 @@ write_todos([
 ---
 
 ## 📊 Şu An Sistemdeki Dosyalar
+### 🎯 MAJOR UPDATE: DeepAgents create_deep_agent Kullanımı
 
+**Önce (Yanlış):**
+```python
+# deep_graph.py - Manuel ReAct
+from langgraph.prebuilt import create_react_agent
+from deepagents.tools import write_todos, read_file, write_file, ls, edit_file
+
+_tools = [web_search, write_todos, read_file, write_file, ls, edit_file]
+graph = create_react_agent(_model, _tools, prompt=DEEP_SYSTEM_PROMPT)
+```
+
+**Problemler:**
+- ❌ Stop condition yok (sonsuz döngü riski)
+- ❌ Manuel tool ekleme (DeepAgents middleware'leri eksik)
+- ❌ Subagent desteği yok
+- ❌ File system backend yok (ephemeral state only)
+
+**Sonra (Doğru):**
+```python
+# deep_graph.py - DeepAgents Native
+from deepagents import create_deep_agent
+
+graph = create_deep_agent(
+    model=_model,
+    tools=[web_search],  # Sadece custom tools - geri kalan otomatik!
+    system_prompt=DEEP_SYSTEM_PROMPT
+)
+```
+
+**Kazançlar:**
+- ✅ Otomatik planning (write_todos middleware)
+- ✅ Otomatik file system (read_file, write_file, ls, edit_file middleware)
+- ✅ Otomatik subagent (task tool ile delegation)
+- ✅ Built-in stop condition (recursion limit + intelligent stopping)
+- ✅ Context management (ephemeral + persistent storage)
+- ✅ LangGraph Studio compatible
+
+**DeepAgents Middleware (Otomatik Ekleniyor):**
+1. **TodoListMiddleware** → write_todos tool
+2. **FilesystemMiddleware** → read_file, write_file, ls, edit_file tools
+3. **SubAgentMiddleware** → task tool (general-purpose subagent)
 ### ✅ GEREKLİ ve KALACAK
 
 #### 1. Multi-Agent Tool Wrapping (multi_agent_tools.py + multi_react.py)

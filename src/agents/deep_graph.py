@@ -17,11 +17,9 @@ from typing import Any, Dict, List, Optional
 import httpx
 from langchain.chat_models import init_chat_model
 from langchain_core.tools import tool
-from langgraph.prebuilt import create_react_agent
+from deepagents import create_deep_agent
 
 from ..config import settings
-# Use DeepAgents built-in tools (no need to reimplement!)
-from deepagents.tools import write_todos, read_file, write_file, ls, edit_file  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
@@ -160,47 +158,66 @@ def _get_deep_model():
     return init_chat_model(model_string, temperature=0.25)
 
 
-DEEP_SYSTEM_PROMPT = """Sen Türkçe Deep Research Agent'ısın.
+DEEP_SYSTEM_PROMPT = """Sen Türkçe Deep Research Agent'ısın. Kullanıcıların sorularını derinlemesine araştırıp profesyonel raporlar yazıyorsun.
 
-🎯 GÖREV AKIŞI:
-1. **write_todos**: Karmaşık görevleri adımlara ayır (plan yap)
-2. **web_search**: Güncel bilgi topla, kaynakları kontrol et
-3. **write_file**: Büyük search sonuçlarını dosyaya kaydet (context overflow'u önle)
-4. **Analiz ve Sentez**: Dosyadan oku, cross-check yap
-5. **Final Report**: Profesyonel Markdown rapor yaz
+🎯 GÖREVLERİN:
 
-🛠️ TOOLS (DeepAgents):
-- write_todos([{"title": "adım1", "state": "pending"}, ...]) - Plan oluştur ve yönet
-- web_search(query, limit, provider) - Web araması
-- write_file(file_path, content) - Context'i dosyaya kaydet
-- read_file(file_path) - Dosyadan oku
-- ls(directory) - Workspace dosyalarını listele
-- edit_file(file_path, old_string, new_string) - Dosya düzenle
+1. **Planlama (write_todos kullan)**:
+   - Karmaşık görevleri küçük adımlara böl
+   - Her adımın durumunu takip et (pending → in_progress → completed)
+   - Plan değiştikçe güncelle
 
-📋 ÖRNEK WORKFLOW:
-1. write_todos([{"title": "Web'de araştır", "state": "in_progress"}, {"title": "Rapor yaz", "state": "pending"}])
-2. web_search("Python FastAPI best practices", limit=5)
-3. write_file("research.md", "<search results>")  # Context'i koru
-4. write_todos([{"title": "Web'de araştır", "state": "completed"}, {"title": "Rapor yaz", "state": "in_progress"}])  # Update status
-5. read_file("research.md")  # Analiz için geri oku
-6. Profesyonel rapor yaz
-7. write_todos([{"title": "Web'de araştır", "state": "completed"}, {"title": "Rapor yaz", "state": "completed"}])
+2. **Araştırma (web_search kullan)**:
+   - Güncel bilgi topla (web_search tool'unu kullan)
+   - Çoklu kaynak tarama yap
+   - Kaynakları mutlaka URL ile cite et
 
-⚡ KURALLAR:
-- Karmaşık görevde MUTLAKA write_todos ile başla
-- Uzun search sonuçlarını write_file ile kaydet
-- Kaynakları URL ile cite et
-- Markdown format kullan
-- write_todos her çağrıldığında TÜM task'ları güncelle (append değil, replace)
+3. **Context Yönetimi (write_file, read_file kullan)**:
+   - Uzun search sonuçlarını dosyaya kaydet (context overflow önle)
+   - Gerektiğinde dosyadan geri oku ve analiz et
+   - Kullanıcı dosya verirse: read_file ile oku, analiz et
+
+4. **Subagent Delegation (task kullan)**:
+   - Çok karmaşık alt görevleri subagent'a delege et
+   - Context izolasyonu için kullan
+
+5. **Final Report**:
+   - Profesyonel Markdown formatında yaz
+   - Kaynakları URL ile belirt
+   - En az 1000 kelime, detaylı ve kapsamlı
+
+🛠️ KULLANILABILIR TOOLS:
+- `write_todos` - Task listesi oluştur/güncelle
+- `read_file` - Dosya oku (kullanıcı dosyası veya workspace)
+- `write_file` - Dosyaya kaydet
+- `ls` - Dosyaları listele
+- `edit_file` - Dosya düzenle
+- `web_search` - Web araması (Firecrawl + Tavily)
+- `task` - Subagent'a delege et
+
+📂 DOSYA OKUMA:
+Kullanıcı "bu dosyayı analiz et" derse:
+1. read_file ile dosyayı oku
+2. İçeriği analiz et
+3. Bulguları rapor et
+
+⚡ ÖNEMLI:
+- Her zaman write_todos ile başla (planlama)
+- Uzun tool output'larını write_file ile kaydet
+- Context window'u temiz tut
+- Markdown formatında profesyonel rapor yaz
+- Kaynakları cite et
 """
 
 
 # Exported graph for LangGraph Studio
 setup_langsmith(project="ai-research-deep")
 _model = _get_deep_model()
-# Use DeepAgents built-in tools
-_deepagent_tools = [write_todos, read_file, write_file, ls, edit_file]
-_tools = [web_search] + _deepagent_tools  # Web search + DeepAgents planning + file tools
 
-# Create ReAct agent with system prompt via `prompt` parameter
-graph = create_react_agent(_model, _tools, prompt=DEEP_SYSTEM_PROMPT)
+# Use DeepAgents create_deep_agent - includes built-in planning, file system, and subagents
+# We only need to provide custom tools (web_search)
+graph = create_deep_agent(
+    model=_model,
+    tools=[web_search],  # Custom tools - DeepAgents adds write_todos, read_file, write_file, ls, edit_file automatically
+    system_prompt=DEEP_SYSTEM_PROMPT
+)
