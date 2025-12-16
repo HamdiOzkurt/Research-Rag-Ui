@@ -103,16 +103,50 @@ def get_llm_model_with_retry(max_retries: int = 3):
 
 
 def sanitize_tool_schema(tool):
-    """Tool schema'sını Gemini uyumlu hale getirir"""
-    if hasattr(tool, 'args_schema') and tool.args_schema:
+    """
+    Tool schema'sını temizler ve bazı özel tool'lar için (örn. Firecrawl)
+    argüman uyumsuzluklarını giderir.
+    """
+    # Ortak şema temizliği (Gemini vb. için)
+    if hasattr(tool, "args_schema") and tool.args_schema:
         schema = tool.args_schema
-        if hasattr(schema, 'schema'):
+        if hasattr(schema, "schema"):
             schema_dict = schema.schema()
-            # Gemini desteklemeyen alanları kaldır
-            if '$schema' in schema_dict:
-                del schema_dict['$schema']
-            if 'additionalProperties' in schema_dict:
-                del schema_dict['additionalProperties']
+            # Bazı modellerin sevmediği alanları kaldır
+            if "$schema" in schema_dict:
+                del schema_dict["$schema"]
+            if "additionalProperties" in schema_dict:
+                del schema_dict["additionalProperties"]
+
+    # Firecrawl özel fix: sources.0 expected object, received string
+    # DeepAgents / LLM bazen `sources: ["google"]` gibi string list veriyor.
+    # Firecrawl MCP ise `[{ "source": "google" }]` bekliyor.
+    try:
+        if getattr(tool, "name", "") == "firecrawl_search":
+            original_ainvoke = getattr(tool, "ainvoke", None)
+
+            if original_ainvoke is not None and callable(original_ainvoke):
+
+                async def patched_ainvoke(
+                    input_data, *args, _orig_ainvoke=original_ainvoke, **kwargs
+                ):
+                    # input_data genelde dict oluyor; yine de korumalı git
+                    if isinstance(input_data, dict) and "sources" in input_data:
+                        sources_val = input_data["sources"]
+                        # Eğer ["google", "news"] gibi string list ise dönüştür
+                        if isinstance(sources_val, list) and sources_val:
+                            if isinstance(sources_val[0], str):
+                                input_data["sources"] = [
+                                    {"source": s} for s in sources_val
+                                ]
+                    return await _orig_ainvoke(input_data, *args, **kwargs)
+
+                tool.ainvoke = patched_ainvoke
+    except Exception:
+        # Bu yardımcı fonksiyon, hata yüzünden tüm agent'ı patlatmamalı.
+        # Hata olursa orijinal tool olduğu gibi kullanılır.
+        pass
+
     return tool
 
 

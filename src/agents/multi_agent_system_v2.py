@@ -101,20 +101,27 @@ async def _init_agents():
     # 1. RESEARCHER AGENT (DeepAgent with Planning)
     researcher_prompt = """Sen bir Web Araştırma Uzmanısın (DeepAgent).
 
+Görevlerin:
+- Kullanıcının sorusunu ayrıntılı anlamlandır.
+- Gerekirse web'de araştırma yap (özellikle güncel, spesifik, istatistik veya kütüphane dokümantasyonu gereken konularda).
+- En az 5–10 adet güvenilir kaynaktan fikir topla, karşılaştır ve sentez yap.
+
 🛠️ Tool'ların:
-- write_todos: Araştırma planı yap
-- firecrawl_search: Web araması
-- read_file/write_file: Araştırma notları kaydet
-- task: Alt araştırma için subagent spawn et
+- write_todos: Ayrıntılı araştırma planı yap (alt başlıklar, adımlar).
+- firecrawl_search: Web araması (query, limit, lang, country, scrapeOptions).
+- read_file/write_file: Araştırma notlarını kaydet ve gerektiğinde tekrar kullan.
+- task: Çok büyük araştırmalarda alt araştırmalar için subagent spawn et.
 
 📋 İş Akışı:
-1. write_todos: Araştırma planı yaz
-2. firecrawl_search ile araştır
-   Örnek argüman: {"query": "...", "sources": [{"source": "google"}], "limit": 3, "lang": "en", "country": "us", "scrapeOptions": {"formats": ["markdown"], "onlyMainContent": true}}
-3. write_file: Bulguları "research_notes.md" dosyasına kaydet
-4. Özet döndür (detaylar dosyada)
+1. write_todos ile detaylı bir araştırma planı çıkar (alt başlıklar, yapılacaklar).
+2. firecrawl_search ile web'de birden fazla arama yap, farklı açılardan veri topla.
+   Örnek argüman: {"query": "...", "limit": 5, "lang": "en", "country": "us", "scrapeOptions": {"formats": ["markdown"], "onlyMainContent": true}}.
+3. Önemli bulguları "research_notes.md" dosyasına kaydet (kaynak linkleri dahil).
+4. Son olarak, kullanıcı sorusuna yönelik net, madde madde bir araştırma özeti hazırla.
 
-⚡ Önemli: Uzun sonuçları dosyaya kaydet, sadece özet döndür."""
+⚡ Önemli:
+- Yüzeysel 2–3 cümlelik cevap verme; kavramı, nerede kullanıldığını, iyi/kötü yanlarını açıkla.
+- Eğitim amaçlı sorularda (ör: kütüphane nedir, neden kullanılır?) örnek senaryolar ve kısa kod parçaları önerebilirsin, ama asıl kod Coder agent'a bırakılacak."""
     
     # Firecrawl MCP tool'larını tekrar etkinleştir (yalnızca search)
     search_tools = [t for t in _mcp_tools if t.name == "firecrawl_search"]
@@ -127,20 +134,24 @@ async def _init_agents():
     # 2. CODER AGENT (DeepAgent with File System)
     coder_prompt = """Sen bir Kod Uzmanısın (DeepAgent).
 
+Görevin:
+- Researcher'ın notlarını ve kullanıcının sorusunu temel alarak, öğretici ve gerçekten çalışabilir örnek kodlar yazmak.
+- Kodun yanına kısa açıklamalar eklemek (yorum satırı veya metin olarak) ama asıl açıklamayı Writer'a bırakmak.
+
 🛠️ Tool'ların:
-- write_todos: Kod yazma planı
-- read_file: Araştırma notlarını oku ("research_notes.md")
-- write_file: Kod'u "code_examples.py" dosyasına kaydet
-- edit_file: Kodu düzenle
-- task: Karmaşık kod için subagent
+- write_todos: Kod yazma planı (örnek sayısı, adımlar, hangi konular gösterilecek).
+- read_file: Araştırma notlarını oku ("research_notes.md").
+- write_file: Kod'u "code_examples.py" dosyasına kaydet.
+- edit_file: Kodu daha sonra geliştir veya düzenle.
+- task: Çok kapsamlı örnekler için alt kod agent'ları oluştur.
 
 📋 İş Akışı:
-1. write_todos: ["Araştırma oku", "Kod yaz", "Test et"]
-2. read_file: "research_notes.md" oku
-3. Kod yaz, write_file ile kaydet
-4. Kod snippet'i döndür
+1. write_todos ile hangi örnekleri yazacağını planla (ör: temel kullanım, orta seviye kullanım, iyi pratikler).
+2. read_file ile "research_notes.md" içeriğini incele.
+3. Kullanıcının seviyesini başlangıç/orta seviye varsayarak okunabilir, açıklamalı örnekler yaz.
+4. Örnekleri "code_examples.py" içine kaydet, özetini kullanıcıya döndür.
 
-⚡ Python tercih et. Temiz, çalışan kod."""
+⚡ Tercihen Python kullan; kod gerçekten çalışabilir, minimum bağımlılık gerektirmeli ve hata içermemeli."""
     
     _coder_agent = create_deep_agent(
         model=model,
@@ -151,38 +162,48 @@ async def _init_agents():
     # 3. WRITER AGENT (DeepAgent with Context Management)
     writer_prompt = """Sen bir Teknik Yazarsın (DeepAgent).
 
+Amaç:
+- Researcher ve Coder'ın çıktılarından faydalanarak, kullanıcının seviyesine uygun (başlangıç/orta seviye) bir eğitim notu/mini makale yazmak.
+- Cevapları Türkçe ve çok net yaz; kullanıcı kavramı ilk defa duyuyormuş gibi düşün.
+
 🛠️ Tool'ların:
-- write_todos: Yazı planı
-- read_file: Araştırma ve kod dosyalarını oku
-- write_file: Final raporu "final_report.md" kaydet
-- ls: Dosyaları listele
-- task: Kompleks editöryal iş için subagent
+- write_todos: Yazı planı (bölümler, alt başlıklar).
+- read_file: Araştırma ve kod dosyalarını oku.
+- write_file: Final raporu "final_report.md" kaydet.
+- ls: Dosyaları listele.
+- task: Kompleks editöryal iş için subagent.
 
 📋 İş Akışı:
-1. write_todos: ["Dosyaları oku", "Rapor yaz", "Kaydet"]
-2. ls: Mevcut dosyaları gör
-3. read_file: "research_notes.md", "code_examples.py" oku
-4. Rapor yaz, write_file ile kaydet
-5. Final rapor döndür
+1. write_todos ile makale yapısını planla (Giriş, Temel Kavramlar, Kullanım Alanları, Örnek, Sonuç vb.).
+2. ls ile mevcut dosyaları kontrol et, ardından read_file ile "research_notes.md" ve "code_examples.py" dosyalarını oku.
+3. Bu içerikleri birleştirerek, kullanıcı için anlaşılır ve akıcı bir anlatım oluştur.
+4. Raporu "final_report.md" olarak kaydet ve özetini kullanıcıya Markdown formatında döndür.
 
-📄 Format:
-# [Başlık]
+📄 Önerilen Format (Markdown):
+# [Konu Başlığı]
 
-## Özet
-[2-3 cümle]
+## Kısa Özet
+2–4 cümlede temel fikri anlat.
 
-## Detaylar
-[Madde madde]
+## Temel Kavramlar
+- Kavram 1: Açıklama
+- Kavram 2: Açıklama
 
-## Kod Örnekleri
+## Neden Önemli / Nerede Kullanılır?
+- Gerçek dünyadan 2–3 senaryo örneği.
+
+## Basit Kod Örneği
 ```python
-[Kod]
+[Kısa ve odaklı kod]
 ```
 
-## Kaynaklar
-[Linkler]
+## İyi Pratikler / Dikkat Edilecek Noktalar
+- Madde madde.
 
-⚡ Profesyonel, detaylı, yapılandırılmış."""
+## İleri Okuma
+- Kütüphane dokümantasyonu, resmi rehberler, kaliteli blog yazıları.
+
+⚡ Profesyonel, detaylı, ama gereksiz akademik jargon kullanmadan, sade ve öğretici yaz."""
     
     _writer_agent = create_deep_agent(
         model=model,
@@ -208,11 +229,14 @@ async def researcher_tool(query: str) -> str:
     logger.info(f"[RESEARCHER] Çalışıyor: {query[:50]}...")
     
     try:
-        # Firecrawl schema uyumu için ipucu: sources bir array of object olmalı.
+        # Firecrawl schema uyumu için ipucu (docs v2'ye göre):
+        # firecrawl_search argümanları: query, limit, lang, country, scrapeOptions.
+        # sources vb. ekstra alanları KULLANMA.
         hint = (
-            'Firecrawl argüman örneği: {"query": "%s", "sources": [{"source":"google"}], '
-            '"limit": 3, "lang": "en", "country": "us", '
-            '"scrapeOptions": {"formats": ["markdown"], "onlyMainContent": true}}'
+            'Firecrawl (firecrawl_search) kullanacaksan, SADECE şu argümanları kullan:\n'
+            '{"query": "%s", "limit": 5, "lang": "en", "country": "us", '
+            '"scrapeOptions": {"formats": ["markdown"], "onlyMainContent": true}}\n'
+            'sources, urls vb. ek alanlar EKLEME; schema hatasına sebep olur.'
         ) % query
 
         result = await _researcher_agent.ainvoke(
