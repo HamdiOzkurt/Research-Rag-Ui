@@ -26,9 +26,14 @@ logger = logging.getLogger(__name__)
 
 def setup_langsmith(project: str = "ai-research-deep") -> bool:
     """Configure LangSmith tracing env vars consistently."""
+    tracing_enabled = os.getenv("LANGSMITH_TRACING", "").strip().lower() in {"1", "true", "yes", "on"}
+    if not tracing_enabled:
+        return False
     if not settings.langsmith_api_key:
         return False
 
+    os.environ["LANGSMITH_TRACING"] = "true"
+    os.environ["LANGSMITH_API_KEY"] = settings.langsmith_api_key
     os.environ["LANGCHAIN_TRACING_V2"] = "true"
     os.environ["LANGCHAIN_PROJECT"] = project
     os.environ["LANGCHAIN_API_KEY"] = settings.langsmith_api_key
@@ -150,6 +155,15 @@ async def web_search(query: str, limit: int = 5, provider: str = "both") -> str:
 
 
 def _get_deep_model():
+    """Deep research kritik -> Groq tercih et"""
+    if settings.groq_api_key:
+        return init_chat_model(
+            "llama-3.3-70b-versatile",
+            model_provider="groq",
+            temperature=0.25
+        )
+    
+    # Fallback: available model
     model_string = settings.get_available_model()
     if settings.google_api_key:
         os.environ["GOOGLE_API_KEY"] = settings.google_api_key
@@ -219,5 +233,5 @@ _model = _get_deep_model()
 graph = create_deep_agent(
     model=_model,
     tools=[web_search],  # Custom tools - DeepAgents adds write_todos, read_file, write_file, ls, edit_file automatically
-    system_prompt=DEEP_SYSTEM_PROMPT
+    system_prompt=DEEP_SYSTEM_PROMPT  # System prompt for agent (DeepAgents version compatibility)
 )

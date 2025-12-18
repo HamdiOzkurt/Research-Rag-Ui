@@ -16,13 +16,19 @@ logger = logging.getLogger(__name__)
 # ============ LANGSMITH TRACING ============
 def setup_langsmith():
     """LangSmith tracing'i aktifleştir - Her çağrıda proje ayarlanır"""
-    if settings.langsmith_api_key:
-        os.environ["LANGCHAIN_TRACING_V2"] = "true"
-        os.environ["LANGCHAIN_PROJECT"] = "ai-research-simple"
-        os.environ["LANGCHAIN_API_KEY"] = settings.langsmith_api_key
-        logger.info("[LANGSMITH] Simple Agent aktif: https://smith.langchain.com/o/personal/projects/p/ai-research-simple")
-        return True
-    return False
+    tracing_enabled = os.getenv("LANGSMITH_TRACING", "").strip().lower() in {"1", "true", "yes", "on"}
+    if not tracing_enabled:
+        return False
+    if not settings.langsmith_api_key:
+        return False
+
+    os.environ["LANGSMITH_TRACING"] = "true"
+    os.environ["LANGSMITH_API_KEY"] = settings.langsmith_api_key
+    os.environ["LANGCHAIN_TRACING_V2"] = "true"
+    os.environ["LANGCHAIN_PROJECT"] = os.getenv("LANGCHAIN_PROJECT", "ai-research-simple")
+    os.environ["LANGCHAIN_API_KEY"] = settings.langsmith_api_key
+    logger.info("[LANGSMITH] Tracing aktif")
+    return True
 
 SIMPLE_PROMPT = """Sen bir Türkçe Araştırma Asistanısın. Kullanıcının sorusuna hızlı ve öz bir şekilde cevap ver.
 

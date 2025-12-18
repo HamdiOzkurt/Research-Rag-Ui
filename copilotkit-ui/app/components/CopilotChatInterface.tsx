@@ -3,11 +3,13 @@
 import { useState, useRef, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Zap, Users, Brain, Loader2, Send, Sparkles, Settings } from "lucide-react";
+import { Zap, Users, Brain, Loader2, Send, Sparkles, Settings, FileText } from "lucide-react";
 import { chatStream, AgentMode, type AgentStatus, getThread } from "@/lib/api";
 import AgentStatusBar from "./AgentStatusBar";
 import MarkdownRenderer from "./MarkdownRenderer";
 import ThreadsList from "./ThreadsList";
+import RAGFileUpload from "./RAGFileUpload";
+
 type ActivityItem = {
   id: string;
   at: number;
@@ -49,14 +51,15 @@ function formatElapsed(ms: number) {
 
 const AGENT_MODES: { value: AgentMode; label: string; icon: React.ReactNode; desc: string }[] = [
   { value: "simple", label: "Hızlı", icon: <Zap className="w-4 h-4" />, desc: "Tek agent, hızlı yanıt" },
-  { value: "multi", label: "Multi-Agent", icon: <Users className="w-4 h-4" />, desc: "Supervisor + 3 Agents" },
-  { value: "deep", label: "Deep Research", icon: <Brain className="w-4 h-4" />, desc: "MCP + Full pipeline" },
+  { value: "multi", label: "RAG Agent", icon: <FileText className="w-4 h-4" />, desc: "Doküman Analizi & Q/A" },
+  { value: "deep", label: "Deep Research", icon: <Brain className="w-4 h-4" />, desc: "Web Search & Planning" },
 ];
 
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+  images?: Array<{ url: string; alt: string }>;
 }
 
 type ThreadMessage = {
@@ -189,11 +192,12 @@ export default function CopilotChatInterface() {
             return [...prev, next].slice(-12);
           });
         },
-        onDone: (finalContent: string) => {
+        onDone: (finalContent: string, metadata?: any) => {
           const assistantMessage: Message = {
             id: (Date.now() + 1).toString(),
             role: "assistant",
             content: finalContent,
+            images: metadata?.images || [],
           };
           setMessages(prev => [...prev, assistantMessage]);
           setIsLoading(false);
@@ -332,7 +336,11 @@ export default function CopilotChatInterface() {
                 </div>
               )}
             </div>
-          )}        </div>
+          )}
+          
+          {/* RAG File Upload - Only in Multi Mode */}
+          {mode === "multi" && <RAGFileUpload />}
+        </div>
 
         {/* Messages Area */}
         <div className="flex-1 overflow-y-auto p-6">
@@ -456,7 +464,26 @@ export default function CopilotChatInterface() {
                     }`}
                   >
                     {msg.role === "assistant" ? (
-                      <MarkdownRenderer content={msg.content} />
+                      <>
+                        <MarkdownRenderer content={msg.content} />
+                        {msg.images && msg.images.length > 0 && (
+                          <div className="mt-4 grid grid-cols-2 gap-2">
+                            {msg.images.map((img, idx) => (
+                              <div key={idx} className="relative group cursor-pointer" onClick={() => window.open(img.url, '_blank')}>
+                                <img 
+                                  src={img.url} 
+                                  alt={img.alt} 
+                                  className="w-full h-auto rounded border border-gray-300 dark:border-gray-700 hover:opacity-90 transition-opacity"
+                                />
+                                <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-10 transition-all rounded flex items-center justify-center">
+                                  <span className="opacity-0 group-hover:opacity-100 text-white text-sm bg-black bg-opacity-70 px-2 py-1 rounded">Click to enlarge</span>
+                                </div>
+                                {img.alt && <p className="text-xs text-gray-500 mt-1">{img.alt}</p>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </>
                     ) : (
                       <div className="prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap">
                         {msg.content}

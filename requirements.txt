@@ -1,6 +1,8 @@
 deepagents
 langgraph
 langchain
+langchain-community
+langchain-text-splitters
 langchain-mcp-adapters
 langchain-google-genai
 langchain-ollama
@@ -16,4 +18,13 @@ fastapi
 uvicorn[standard]
 PyJWT[crypto]
 stripe
+
+# RAG Dependencies
+pypdf
+docx2txt
+unstructured[pdf]
+
+# Local multimodal (optional)
+faster-whisper>=1.0.0
+ffmpeg-python>=0.2.0
 

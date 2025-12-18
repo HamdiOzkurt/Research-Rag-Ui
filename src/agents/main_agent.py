@@ -27,16 +27,21 @@ logger = logging.getLogger(__name__)
 
 def setup_langsmith():
     """LangSmith tracing'i etkinleştirir"""
-    os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
-    os.environ.setdefault("LANGCHAIN_PROJECT", "ai-research-deep")
-    logger.info("[LANGSMITH] Deep Research aktif: https://smith.langchain.com/o/personal/projects/p/ai-research-deep")
-    if settings.langsmith_api_key:
-        os.environ["LANGCHAIN_API_KEY"] = settings.langsmith_api_key
-        os.environ.setdefault("LANGCHAIN_ENDPOINT", "https://api.smith.langchain.com")
-        print("[OK] LangSmith tracing aktif!")
-        print("   📊 https://smith.langchain.com")
-        return True
-    return False
+    tracing_enabled = os.getenv("LANGSMITH_TRACING", "").strip().lower() in {"1", "true", "yes", "on"}
+    if not tracing_enabled:
+        return False
+
+    if not settings.langsmith_api_key:
+        return False
+
+    os.environ["LANGSMITH_TRACING"] = "true"
+    os.environ["LANGSMITH_API_KEY"] = settings.langsmith_api_key
+    os.environ["LANGCHAIN_TRACING_V2"] = "true"
+    os.environ["LANGCHAIN_PROJECT"] = os.getenv("LANGCHAIN_PROJECT", "ai-research-deep")
+    os.environ["LANGCHAIN_API_KEY"] = settings.langsmith_api_key
+    os.environ.setdefault("LANGCHAIN_ENDPOINT", "https://api.smith.langchain.com")
+    logger.info("[LANGSMITH] Tracing aktif")
+    return True
 
 
 # NOTE: Deep mode is now powered by LangGraph ReAct graph in `deep_graph.py`.

@@ -26,6 +26,20 @@ export default function MarkdownRenderer({ content }: Props) {
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}
         components={{
+          img({ node, src, alt, ...props }: any) {
+            return (
+              <span className="block my-4">
+                <img 
+                  src={src} 
+                  alt={alt || 'Image'} 
+                  className="max-w-full h-auto rounded-lg border border-gray-300 dark:border-gray-700 cursor-pointer hover:opacity-90 transition-opacity"
+                  onClick={() => window.open(src, '_blank')}
+                  {...props}
+                />
+                {alt && <em className="text-sm text-gray-500 dark:text-gray-400 block mt-2">{alt}</em>}
+              </span>
+            );
+          },
           code({ node, className, children, ...props }: any) {
             const match = /language-(\w+)/.exec(className || "");
             const codeString = String(children).replace(/\n$/, "");
