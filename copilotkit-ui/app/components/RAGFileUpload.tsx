@@ -29,17 +29,47 @@ export default function RAGFileUpload() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // Check for duplicate filename
+    const isDuplicate = documents.some(doc => doc.filename === file.name);
+    if (isDuplicate) {
+      const confirmed = window.confirm(
+        `⚠️ "${file.name}" zaten yüklenmiş!\n\nTekrar yüklemek istiyor musunuz? (Duplicate chunk'lar eklenebilir)`
+      );
+      if (!confirmed) {
+        e.target.value = ""; // Reset input
+        return;
+      }
+    }
+
     setIsUploading(true);
     try {
       // 1. Upload
+      console.log("📤 Uploading file:", file.name);
       const uploadRes = await uploadFile(file);
+      console.log("✅ Upload response:", uploadRes);
+      
       if (uploadRes.status === "success") {
         // 2. Ingest
-        await ingestFile(uploadRes.path, file.name);
+        console.log("🔄 Starting ingestion...", uploadRes.path);
+        const ingestRes = await ingestFile(uploadRes.path, file.name);
+        console.log("✅ Ingest response:", ingestRes);
+        
+        // Check if duplicate
+        if (ingestRes.duplicate || ingestRes.status === "duplicate") {
+          alert(`⚠️ Bu dosya zaten yüklenmişti!\n\n"${file.name}" daha önce ingest edilmiş.\n\nYeni chunk eklenmedi (0 chunk).`);
+        } else if (ingestRes.chunks > 0) {
+          console.log(`✅ ${ingestRes.chunks} chunks added`);
+        }
+        
         await loadDocuments();
+        console.log("✅ Documents reloaded");
+      } else {
+        console.error("❌ Upload failed:", uploadRes);
+        alert(`Upload failed: ${JSON.stringify(uploadRes)}`);
       }
     } catch (error) {
-      console.error("Upload failed", error);
+      console.error("❌ Error during upload/ingest:", error);
+      alert(`Error: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setIsUploading(false);
       // Reset input

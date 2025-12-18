@@ -89,6 +89,13 @@ class Settings(BaseModel):
     ollama_base_url: str = Field(
         default_factory=lambda: os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     )
+
+    # ============ Backend Public URL (for generated links) ============
+    # Used for returning clickable image URLs to the frontend.
+    # In dev: http://127.0.0.1:8000
+    backend_public_url: str = Field(
+        default_factory=lambda: os.getenv("BACKEND_PUBLIC_URL", "http://127.0.0.1:8000")
+    )
     
     # ============ MCP API Keys ============
     firecrawl_api_key: Optional[str] = Field(

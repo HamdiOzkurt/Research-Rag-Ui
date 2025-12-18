@@ -500,6 +500,9 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 class FileIngestRequest(BaseModel):
     file_path: str
     source_name: Optional[str] = None
+    
+    class Config:
+        extra = "ignore"  # Ignore extra fields instead of erroring
 
 @app.post("/api/rag/upload")
 async def upload_file(file: UploadFile = File(...)):
@@ -525,10 +528,13 @@ async def upload_file(file: UploadFile = File(...)):
 async def ingest_file(request: FileIngestRequest):
     """Process uploaded file and ingest into vector store"""
     try:
+        logger.info(f"[RAG] Ingest request: file_path={request.file_path}, source_name={request.source_name}")
         from .agents.rag_agent import ingest_text, load_pdf, load_docx, load_csv, transcribe_audio, analyze_image
         
         file_path = Path(request.file_path)
         source_name = request.source_name or file_path.name
+        
+        logger.info(f"[RAG] Resolved path: {file_path}, exists: {file_path.exists()}")
         
         if not file_path.exists():
             raise HTTPException(status_code=404, detail="File not found")
@@ -553,12 +559,20 @@ async def ingest_file(request: FileIngestRequest):
         # Ingest into vector store
         chunks_count = ingest_text(text, source_name)
         
-        logger.info(f"[RAG] Ingested {source_name}: {chunks_count} chunks")
+        # Check if it was a duplicate (0 chunks = already ingested)
+        was_duplicate = chunks_count == 0
+        
+        if was_duplicate:
+            logger.warning(f"[RAG] ⚠️ Duplicate detected: {source_name}")
+        else:
+            logger.info(f"[RAG] ✅ Ingested {source_name}: {chunks_count} chunks")
+        
         return {
-            "status": "success",
+            "status": "success" if not was_duplicate else "duplicate",
             "source": source_name,
             "chunks": chunks_count,
-            "text_length": len(text)
+            "text_length": len(text),
+            "duplicate": was_duplicate
         }
     except Exception as e:
         logger.error(f"[RAG] Ingest error: {e}", exc_info=True)
@@ -566,17 +580,27 @@ async def ingest_file(request: FileIngestRequest):
 
 @app.get("/api/rag/documents")
 async def list_documents():
-    """List all uploaded documents"""
+    """List all ingested documents from vector store (not filesystem)"""
     try:
+        from .agents.rag_agent import get_ingested_sources
+        
+        # Get sources from vector store
+        sources = get_ingested_sources()
+        
+        # Enrich with file metadata if file exists
         files = []
-        for file_path in UPLOAD_DIR.iterdir():
-            if file_path.is_file():
-                files.append({
-                    "filename": file_path.name,
-                    "path": str(file_path),
-                    "size": file_path.stat().st_size,
-                    "modified": file_path.stat().st_mtime
-                })
+        for source_name in sources:
+            file_path = UPLOAD_DIR / source_name
+            
+            doc_info = {
+                "filename": source_name,
+                "path": str(file_path) if file_path.exists() else None,
+                "size": file_path.stat().st_size if file_path.exists() else 0,
+                "modified": file_path.stat().st_mtime if file_path.exists() else None,
+                "ingested": True  # Always true since it's from vector store
+            }
+            files.append(doc_info)
+        
         return {"documents": files}
     except Exception as e:
         logger.error(f"[RAG] List error: {e}", exc_info=True)
@@ -611,6 +635,59 @@ async def debug_vector_store():
     except Exception as e:
         logger.error(f"[RAG] Debug error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/rag/sources")
+async def list_sources():
+    """List all ingested sources in vector store"""
+    try:
+        from .agents.rag_agent import get_ingested_sources
+        
+        sources = get_ingested_sources()
+        return {
+            "total": len(sources),
+            "sources": sources
+        }
+    except Exception as e:
+        logger.error(f"[RAG] Error listing sources: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/rag/clear")
+async def clear_rag_store():
+    """Clear entire RAG vector store"""
+    try:
+        from .agents.rag_agent import clear_vector_store
+        
+        clear_vector_store()
+        return {
+            "status": "success",
+            "message": "Vector store cleared"
+        }
+    except Exception as e:
+        logger.error(f"[RAG] Error clearing store: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/rag/sources/{source_name}")
+async def remove_source(source_name: str):
+    """Remove a specific source from vector store"""
+    try:
+        from .agents.rag_agent import remove_source as rag_remove_source
+        
+        success = rag_remove_source(source_name)
+        if not success:
+            raise HTTPException(status_code=404, detail="Source not found")
+        
+        return {
+            "status": "success",
+            "message": f"Source removed: {source_name}"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[RAG] Error removing source: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/rag/images")
 async def list_images():
@@ -685,6 +762,8 @@ async def debug_chunks_html():
                 .chunk-id {{ color: #f85149; font-weight: bold; }}
                 .chunk-length {{ color: #8b949e; font-size: 13px; }}
                 .chunk-content {{ color: #c9d1d9; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; font-family: 'Consolas', monospace; font-size: 13px; }}
+                .chunk-content img {{ cursor: pointer; transition: transform 0.2s; }}
+                .chunk-content img:hover {{ transform: scale(1.02); box-shadow: 0 4px 12px rgba(88, 166, 255, 0.3); }}
                 .toggle-icon {{ float: right; transition: transform 0.3s; }}
                 .toggle-icon.active {{ transform: rotate(180deg); }}
             </style>
@@ -723,10 +802,30 @@ async def debug_chunks_html():
                 # Convert markdown image paths to clickable URLs
                 import re
                 content = chunk['content']
-                # Replace ![](path) with <img> tags and clickable links
+                
+                # Replace ![alt](path) with HTML img tags
+                def replace_image(match):
+                    alt_text = match.group(1) or "Image"
+                    img_path = match.group(2)
+                    
+                    # Ensure path starts with /
+                    if not img_path.startswith('/') and not img_path.startswith('http'):
+                        img_path = '/' + img_path
+                    
+                    return f'''<div style="margin:10px 0; background:#161b22; padding:10px; border-radius:6px;">
+                        <a href="{img_path}" target="_blank">
+                            <img src="{img_path}" 
+                                 style="max-width:100%; max-height:400px; border:1px solid #30363d; border-radius:6px; display:block;" 
+                                 alt="{alt_text}"
+                                 onerror="this.parentElement.innerHTML='❌ Image not found: {img_path}'"
+                            />
+                        </a>
+                        <small style="color:#8b949e">🖼️ {alt_text} - Click to open full size</small>
+                    </div>'''
+                
                 content = re.sub(
                     r'!\[([^\]]*)\]\(([^)]+)\)',
-                    r'<div style="margin:10px 0"><a href="/\2" target="_blank"><img src="/\2" style="max-width:100%; max-height:400px; border:1px solid #30363d; border-radius:6px" alt="\1"/></a><br><small style="color:#8b949e">🖼️ Click to open full size</small></div>',
+                    replace_image,
                     content
                 )
                 
