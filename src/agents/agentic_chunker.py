@@ -26,47 +26,19 @@ logger = logging.getLogger(__name__)
 
 
 def _get_chunker_llm():
-    """Get LLM for agentic chunking - prefer Gemini 2.5, fallback to Groq"""
+    """Get LLM for agentic chunking - uses local Ollama (llama3.2:3b)"""
     
-    # 1) Try Gemini 2.0 Flash (best for agentic tasks, stable)
-    if settings.google_api_key:
-        try:
-            from langchain_google_genai import ChatGoogleGenerativeAI
-            logger.info("[AgenticChunker] Using Gemini 2.0 Flash")
-            return ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash-exp",
-                google_api_key=settings.google_api_key,
-                temperature=0,
-                max_output_tokens=500,
-            )
-        except Exception as e:
-            logger.warning(f"[AgenticChunker] Gemini failed: {e}")
-    
-    # 2) Fallback to Groq (fast, reliable)
-    if settings.groq_api_key:
-        try:
-            from langchain_groq import ChatGroq
-            logger.info("[AgenticChunker] Using Groq (llama-3.3-70b)")
-            return ChatGroq(
-                model="llama-3.3-70b-versatile",
-                api_key=settings.groq_api_key,
-                temperature=0,
-                max_tokens=500,
-            )
-        except Exception as e:
-            logger.warning(f"[AgenticChunker] Groq failed: {e}")
-    
-    # 3) Fallback to Ollama (local)
+    # Use local Ollama - llama3.2:3b (2GB, optimal for semantic chunking)
     try:
         from langchain_ollama import ChatOllama
-        logger.info("[AgenticChunker] Using Ollama (local)")
+        logger.info("[AgenticChunker] Using Ollama llama3.2:3b (local)")
         return ChatOllama(
-            model="llama3.2",
+            model="llama3.2:3b",
             base_url=settings.ollama_base_url,
             temperature=0,
         )
     except Exception as e:
-        logger.error(f"[AgenticChunker] No LLM available: {e}")
+        logger.error(f"[AgenticChunker] Ollama failed: {e}")
         return None
 
 

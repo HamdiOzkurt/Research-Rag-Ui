@@ -21,6 +21,7 @@ stripe
 
 # RAG Dependencies
 pypdf
+python-docx>=1.1.0
 docx2txt
 unstructured[pdf]
 

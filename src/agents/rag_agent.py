@@ -437,35 +437,140 @@ def load_pdf(file_path: str) -> str:
 @tool
 def load_docx(file_path: str) -> str:
     """
-    Load and extract text from a DOCX file using Unstructured.
+    Load and extract text + images from a DOCX file using python-docx.
+    Extracts text, tables, and saves embedded images similar to PDF processing.
     
     Args:
         file_path: Absolute path to DOCX file
         
     Returns:
-        Extracted text content (Markdown)
+        Extracted text content (Markdown with image references)
     """
+    # 1. Try python-docx with image extraction (Primary method)
+    try:
+        from docx import Document as DocxDocument
+        from docx.oxml.text.paragraph import CT_P
+        from docx.oxml.table import CT_Tbl
+        from docx.table import Table
+        from docx.text.paragraph import Paragraph
+        import io
+        
+        logger.info(f"[DOCX] Processing {Path(file_path).name} with python-docx...")
+        
+        # Create images folder
+        images_folder = Path(file_path).parent / f"{Path(file_path).stem}_images"
+        images_folder.mkdir(exist_ok=True)
+        
+        doc = DocxDocument(file_path)
+        markdown_parts = []
+        image_counter = 0
+        
+        # Extract images from document
+        image_map = {}  # Map relationship ID to saved filename
+        for rel_id, rel in doc.part.rels.items():
+            if "image" in rel.target_ref:
+                try:
+                    image_data = rel.target_part.blob
+                    # Determine extension from content type
+                    ext_map = {
+                        'image/png': 'png',
+                        'image/jpeg': 'jpg',
+                        'image/jpg': 'jpg',
+                        'image/gif': 'gif',
+                        'image/bmp': 'bmp'
+                    }
+                    ext = ext_map.get(rel.target_part.content_type, 'png')
+                    
+                    # Save image
+                    image_filename = f"{Path(file_path).stem}-{image_counter}.{ext}"
+                    image_path = images_folder / image_filename
+                    image_path.write_bytes(image_data)
+                    
+                    # Store relative path for markdown
+                    relative_path = f"{images_folder.name}/{image_filename}"
+                    image_map[rel_id] = relative_path
+                    image_counter += 1
+                    
+                except Exception as e:
+                    logger.warning(f"[DOCX] Failed to extract image {rel_id}: {e}")
+        
+        # Process paragraphs and tables in order
+        for element in doc.element.body:
+            if isinstance(element, CT_P):
+                para = Paragraph(element, doc)
+                text = para.text.strip()
+                
+                # Check paragraph style for headers
+                style_name = para.style.name if para.style else ""
+                
+                if style_name.startswith('Heading 1'):
+                    markdown_parts.append(f"# {text}")
+                elif style_name.startswith('Heading 2'):
+                    markdown_parts.append(f"## {text}")
+                elif style_name.startswith('Heading 3'):
+                    markdown_parts.append(f"### {text}")
+                elif style_name.startswith('Heading 4'):
+                    markdown_parts.append(f"#### {text}")
+                elif text:
+                    markdown_parts.append(text)
+                
+                # Check for inline images
+                for run in para.runs:
+                    for rel_id in run.element.xpath('.//a:blip/@r:embed', namespaces={
+                        'a': 'http://schemas.openxmlformats.org/drawingml/2006/main',
+                        'r': 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+                    }):
+                        if rel_id in image_map:
+                            markdown_parts.append(f"![Image]({image_map[rel_id]})")
+                
+            elif isinstance(element, CT_Tbl):
+                table = Table(element, doc)
+                # Convert table to markdown
+                markdown_parts.append("\n")
+                for i, row in enumerate(table.rows):
+                    cells = [cell.text.strip() for cell in row.cells]
+                    markdown_parts.append("| " + " | ".join(cells) + " |")
+                    if i == 0:  # Add separator after header
+                        markdown_parts.append("| " + " | ".join(["---"] * len(cells)) + " |")
+                markdown_parts.append("\n")
+        
+        md_text = "\n\n".join(markdown_parts)
+        logger.info(f"[DOCX] ✅ Converted {len(md_text)} chars with {image_counter} images (python-docx)")
+        
+        # Save debug file
+        debug_path = Path(file_path).parent / f"{Path(file_path).stem}_docx_debug.md"
+        debug_path.write_text(md_text, encoding="utf-8")
+        logger.info(f"[DOCX] 📝 Markdown saved to: {debug_path}")
+        if image_counter > 0:
+            logger.info(f"[DOCX] 🖼️ {image_counter} images saved to: {images_folder}")
+        
+        if len(md_text) >= 50:
+            return md_text
+            
+    except Exception as e:
+        logger.warning(f"[DOCX] python-docx failed ({e}), falling back to Unstructured...")
+    
+    # 2. Fallback: Unstructured (no image extraction)
     try:
         from unstructured.partition.docx import partition_docx
         
-        logger.info(f"[DOCX] Processing {Path(file_path).name} with Unstructured...")
+        logger.info(f"[DOCX] Processing {Path(file_path).name} with Unstructured (fallback)...")
         
         elements = partition_docx(filename=file_path)
         text = "\n\n".join([str(el) for el in elements])
         
         logger.info(f"[DOCX] ✅ Converted {len(text)} chars (Unstructured)")
         
-        # DEBUG: Save to file to inspect
-        debug_path = Path(file_path).parent / f"{Path(file_path).stem}_markdown_debug.md"
+        debug_path = Path(file_path).parent / f"{Path(file_path).stem}_unstructured_debug.md"
         debug_path.write_text(text, encoding="utf-8")
         logger.info(f"[DOCX] 📝 Markdown saved to: {debug_path}")
         
         return text
         
-    except Exception as e:
-        logger.warning(f"[DOCX] Unstructured failed ({e}), falling back to Docx2txt...")
+    except Exception as e2:
+        logger.warning(f"[DOCX] Unstructured failed ({e2}), falling back to Docx2txt...")
         
-        # Fallback: Docx2txtLoader
+        # 3. Last Fallback: Docx2txt (text only)
         try:
             if Docx2txtLoader:
                 loader = Docx2txtLoader(file_path)
@@ -475,8 +580,8 @@ def load_docx(file_path: str) -> str:
             else:
                 import docx2txt
                 return docx2txt.process(file_path)
-        except Exception as e2:
-            logger.error(f"[DOCX] Error loading {file_path}: {e2}")
+        except Exception as e3:
+            logger.error(f"[DOCX] All methods failed: {e3}")
             return f"Error loading DOCX: {str(e)}"
 
 

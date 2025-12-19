@@ -35,6 +35,9 @@ app = FastAPI(
     version="2.0.0"
 )
 
+# Ensure uploads directory exists early (used by multiple endpoints and static mount)
+Path("./uploads").mkdir(exist_ok=True)
+
 # ============ STARTUP: INGEST EXISTING FILES ============
 @app.on_event("startup")
 async def startup_event():
@@ -88,7 +91,12 @@ async def startup_event():
 
 # CORS
 allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
-allowed_origins: List[str] = ["http://localhost:3000", "http://localhost:3001"]
+allowed_origins: List[str] = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+]
 if allowed_origins_env.strip():
     allowed_origins = [o.strip() for o in allowed_origins_env.split(",") if o.strip()]
 
@@ -101,9 +109,7 @@ app.add_middleware(
 )
 
 # Mount uploads directory for serving images and files
-uploads_path = Path("./uploads")
-if uploads_path.exists():
-    app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # Showcase Mode: Single Demo User
 DEMO_USER_ID = "demo-user-showcase"
@@ -359,16 +365,17 @@ async def stats():
 
 @app.get("/health")
 async def health():
-    """Health check"""
-    memory = get_memory()
-    api_status = settings.validate_api_keys()
+    """Health check (fast, no network calls).
+
+    Frontend uses this endpoint to decide whether the backend is reachable.
+    Keep it non-blocking: avoid Supabase/LLM network calls here.
+    """
     return {
         "status": "ok",
-        "apis": api_status,
-        "supabase": {
-            "enabled": memory.is_enabled(),
-            "table": "conversations",
-        },
+        "version": app.version,
+        "supabase_configured": bool(settings.supabase_url and settings.supabase_key),
+        "google_configured": bool(settings.google_api_key),
+        "groq_configured": bool(settings.groq_api_key),
     }
 
 @app.delete("/cache")
