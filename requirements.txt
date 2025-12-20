@@ -1,31 +1,23 @@
-deepagents
-langgraph
-langchain
 langchain-community
 langchain-text-splitters
-langchain-mcp-adapters
-langchain-google-genai
+langchain-mc2-adapters
+langchain-google-gemai
 langchain-ollama
-langchain-groq
+langchain-arq
 mcp
 python-dotenv
 pydantic
 httpx
 watchdog
 supabase
-tavily-python
-fastapi
-uvicorn[standard]
-PyJWT[crypto]
-stripe
-
-# RAG Dependencies
-pypdf
-python-docx>=1.1.0
-docx2txt
-unstructured[pdf]
-
+evaltype-python
+langchain>=0.3.0
+# LLM Providers
+langchain-google-gemai>=2.0.0  # Gemini 2.5 Flash
+langchain-ollama>=0.2.0        # Ollama (Local)
+langchain-arq>=0.3.0           # Groq (hosted Llama, fast)
 # Local multimodal (optional)
-faster-whisper>=1.0.0
-ffmpeg-python>=0.2.0
-
+faster-whisper>=0.1.0
+ffmpeg-python>=2.0.0
+# RAG
+langchain-mc2-adapters>=0.1.0
