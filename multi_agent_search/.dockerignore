@@ -1,0 +1,14 @@
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache/
+**/.mypy_cache/
+
+copilotkit-ui/node_modules/
+copilotkit-ui/.next/
+copilotkit-ui/out/
+
+.env
+venv/
+

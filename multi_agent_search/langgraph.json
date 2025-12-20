@@ -1,0 +1,22 @@
+{
+  "version": "v0.1",
+  "project": "ai-research-multi-agent",
+  "graphs": {
+    "deep": {
+      "path": "src/agents/deep_graph.py:graph",
+      "description": "Deep Research ReAct agent with web search tools"
+    }
+  },
+  "dependencies": [
+    "langchain",
+    "langgraph",
+    "langchain-mcp-adapters",
+    "langchain-google-genai",
+    "langchain-ollama",
+    "langchain-groq",
+    "httpx",
+    "python-dotenv",
+    "pydantic"
+  ],
+  "env": ".env"
+}
