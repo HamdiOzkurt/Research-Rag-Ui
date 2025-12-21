@@ -128,6 +128,80 @@ def _extract_section_from_content(content: str) -> dict:
     return metadata
 
 
+def _find_cross_references(content: str) -> List[str]:
+    """
+    Find figure/table references in content (works for TR/EN documents).
+    
+    Detects patterns like:
+    - Şekil 1, Şekil 2'de, Şekil 3'te
+    - Tablo 1, Tablo 2'de
+    - Figure 1, Figure 2
+    - Table 1, Table 2
+    - Grafik 1, Chart 1
+    
+    Returns: List of unique references found (e.g., ["Şekil 1", "Tablo 3"])
+    """
+    if not content:
+        return []
+    
+    try:
+        patterns = [
+            r'Şekil\s*\d+',           # Şekil 1, Şekil 2
+            r'Tablo\s*\d+',           # Tablo 1, Tablo 2  
+            r'Figure\s*\d+',          # Figure 1
+            r'Table\s*\d+',           # Table 1
+            r'Grafik\s*\d+',          # Grafik 1
+            r'Chart\s*\d+',           # Chart 1
+            r'Diyagram\s*\d+',        # Diyagram 1
+            r'Diagram\s*\d+',         # Diagram 1
+        ]
+        
+        refs = []
+        for pattern in patterns:
+            matches = re.findall(pattern, content, re.IGNORECASE)
+            refs.extend(matches)
+        
+        # Normalize and deduplicate (e.g., "şekil 1" -> "Şekil 1")
+        normalized = []
+        seen = set()
+        for ref in refs:
+            # Title case for consistency
+            normalized_ref = ref.strip().title()
+            if normalized_ref.lower() not in seen:
+                seen.add(normalized_ref.lower())
+                normalized.append(normalized_ref)
+        
+        return normalized
+    except Exception:
+        # Never crash - return empty on any error
+        return []
+
+
+def _count_tables_in_content(content: str) -> int:
+    """
+    Count markdown tables in content.
+    A table is detected by lines starting with '|'.
+    
+    Returns: Number of tables found
+    """
+    if not content:
+        return 0
+    
+    try:
+        # Count table header rows (lines with | that are followed by |---|)
+        lines = content.split('\n')
+        table_count = 0
+        
+        for i, line in enumerate(lines):
+            # Look for table separator row (|---|---|)
+            if re.match(r'^\s*\|[\s\-:]+\|', line):
+                table_count += 1
+        
+        return table_count
+    except Exception:
+        return 0
+
+
 def _detect_boilerplate(chunks: List[str], threshold: float = 0.7) -> List[str]:
     """
     Detect and return boilerplate patterns that appear in >70% of chunks.
@@ -596,6 +670,11 @@ def load_docx(file_path: str) -> str:
     if image_count_debug > 0 and image_counter == 0:
         logger.warning("[DOCX DEBUG] ⚠️ Images found but none saved! Check extraction logic.")
     
+    # ✅ DEBUG: Log sample paths
+    if image_map:
+        sample_path = next(iter(image_map.values()))
+        logger.info(f"[DOCX DEBUG] Sample image path: {sample_path}")
+    
     # 2. Process paragraphs + tables in DOCUMENT ORDER
     for element in doc.element.body:
         if isinstance(element, CT_P):
@@ -796,13 +875,23 @@ def validate_chunk_quality(chunks: List[Document]) -> List[Document]:
                 logger.info(f"[CLEAN] Removed {original_len - cleaned_len} chars of boilerplate")
                 chunk.page_content = content.strip()
         
-        # Filter 1: Too short (likely formatting noise)
-        if len(content) < 50 and not chunk.metadata.get("has_images", False):
+        # ✅ YENİ - Content'te image var mı kontrol et
+        has_images_in_content = bool(re.search(r'!\[[^\]]*\]\([^)]+\)', content))
+        has_images_in_meta = chunk.metadata.get("has_images", False)
+
+        # Metadata düzelt
+        if has_images_in_content and not has_images_in_meta:
+            chunk.metadata["has_images"] = True
+            logger.info(f"[VALIDATE] Fixed has_images metadata for chunk")
+
+        # Filter 1: Too short - UNLESS has images
+        # ✅ FIX: Increase minimum to 200 chars (was 50) - prevents tiny chunks like "Anahtar sözcükler"
+        if len(content) < 200 and not has_images_in_content:
             continue
         
         # Filter 2: Only whitespace/formatting
         text_only = re.sub(r'[#*\-_\[\]()!\n\s]+', '', content)
-        if len(text_only) < 15 and not chunk.metadata.get("has_images", False):
+        if len(text_only) < 30 and not chunk.metadata.get("has_images", False):  # Increased from 15
             continue
         
         # Filter 3: Orphaned images (image with < 20 chars of explanatory text)

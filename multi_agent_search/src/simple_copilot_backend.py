@@ -884,12 +884,48 @@ async def debug_chunks_html():
                     content
                 )
                 
+                # ✅ YENİ: Metadata'yı göster (TÜM ALANLAR)
+                metadata = chunk.get('metadata', {})
+                metadata_items = []
+                
+                # Core metadata
+                metadata_items.append(f"Source: {metadata.get('source', 'N/A')}")
+                metadata_items.append(f"Chunk ID: {metadata.get('chunk_id', 'N/A')}")
+                metadata_items.append(f"Index: {metadata.get('chunk_index', 'N/A')}")
+                
+                # Content metadata
+                if metadata.get('title'):
+                    metadata_items.append(f"Title: {metadata['title'][:80]}")
+                if metadata.get('summary'):
+                    metadata_items.append(f"Summary: {metadata['summary'][:120]}...")
+                
+                # Visual metadata
+                metadata_items.append(f"Has Images: {'✅' if metadata.get('has_images') else '❌'}")
+                if metadata.get('cross_references'):
+                    metadata_items.append(f"Cross-Refs: {metadata['cross_references']}")
+                if metadata.get('table_count', 0) > 0:
+                    metadata_items.append(f"Tables: {metadata['table_count']}")
+                
+                # Section metadata
+                if metadata.get('section_h1'):
+                    metadata_items.append(f"Section H1: {metadata['section_h1']}")
+                if metadata.get('section_h2'):
+                    metadata_items.append(f"Section H2: {metadata['section_h2']}")
+                
+                metadata_html = f"""
+                    <div style="background:#0d1117; border:1px solid #30363d; border-radius:4px; padding:8px; margin:10px 0; font-size:12px;">
+                        <strong style="color:#58a6ff;">📋 Metadata:</strong><br>
+                        <span style="color:#8b949e;">{'<br>• '.join([''] + metadata_items)}</span>
+                    </div>
+                """ if metadata_items else ""
+                
                 html += f"""
                         <div class="chunk">
                             <div class="chunk-header">
                                 <span class="chunk-id">Chunk #{chunk['id']}</span>
                                 <span class="chunk-length">{chunk['length']} chars</span>
                             </div>
+                            {metadata_html}
                             <div class="chunk-content">{content}</div>
                         </div>
                 """

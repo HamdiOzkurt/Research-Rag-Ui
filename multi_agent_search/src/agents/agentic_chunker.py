@@ -26,13 +26,13 @@ logger = logging.getLogger(__name__)
 
 
 def _get_chunker_llm():
-    """Get LLM for agentic chunking - uses local Ollama (qwen2.5:7b)"""
+    """Get LLM for agentic chunking - uses local Ollama (qwen2.5:3b)"""
     
-    # Use local Ollama - qwen2.5:7b (4.7GB, superior for semantic chunking & Turkish)
+    # Use local Ollama - qwen2.5:3b 
     try:
         from langchain_ollama import ChatOllama
         ollama_url = settings.ollama_base_url
-        logger.info(f"[AgenticChunker] Connecting to Ollama at {ollama_url} with qwen2.5:7b")
+        logger.info(f"[AgenticChunker] Connecting to Ollama at {ollama_url} with qwen2.5:3b")
         
         # Test connection first
         import httpx
@@ -45,7 +45,7 @@ def _get_chunker_llm():
             return None
         
         return ChatOllama(
-            model="qwen2.5:7b",
+            model="qwen2.5:3b",
             base_url=ollama_url,
             temperature=0,
             num_gpu=-1,
@@ -69,6 +69,7 @@ class AgenticChunker:
         self.id_truncate_limit = 8
         self.generate_new_metadata_ind = True  # Update summaries as chunks grow
         self.print_logging = False  # Set True for debug
+        self._chunk_counter = 0  # ✅ FIX: Stable chunk indexing
         
         self.llm = _get_chunker_llm()
         if not self.llm:
@@ -93,9 +94,32 @@ class AgenticChunker:
             self._create_new_chunk(proposition, **kwargs)
             return
         
-        # First chunk - just create it
+        # First chunk - check size before creating
         if len(self.chunks) == 0:
-            self._create_new_chunk(proposition, **kwargs)
+            # ✅ FIX: Split oversized first proposition
+            if len(proposition) > 1800:
+                if self.print_logging:
+                    logger.info(f"[AgenticChunker] First proposition too large ({len(proposition)} chars), splitting...")
+                # Split into smaller parts (simple paragraph split)
+                parts = proposition.split('\n\n')
+                current_part = []
+                current_size = 0
+                
+                for para in parts:
+                    if current_size + len(para) > 1800 and current_part:
+                        # Create chunk with accumulated parts
+                        self._create_new_chunk('\n\n'.join(current_part), **kwargs)
+                        current_part = [para]
+                        current_size = len(para)
+                    else:
+                        current_part.append(para)
+                        current_size += len(para)
+                
+                # Create final chunk
+                if current_part:
+                    self._create_new_chunk('\n\n'.join(current_part), **kwargs)
+            else:
+                self._create_new_chunk(proposition, **kwargs)
             return
         
         # Find relevant existing chunk
@@ -141,7 +165,12 @@ Sadece özeti yaz, başka hiçbir şey yazma."""),
         ])
         
         result = (PROMPT | self.llm).invoke({
-            "propositions": "\n".join(chunk['propositions'][-5:]),  # Last 5 for efficiency
+            # ✅ FIX: Use first 2 + last 3 propositions to prevent "title drift"
+            "propositions": "\n".join(
+                chunk['propositions'][:2] + chunk['propositions'][-3:]
+                if len(chunk['propositions']) > 5
+                else chunk['propositions']
+            ),
             "current_summary": chunk['summary']
         })
         
@@ -207,19 +236,23 @@ Sadece başlığı yaz, başka hiçbir şey yazma."""),
     
     def _create_new_chunk(self, proposition: str, **kwargs) -> str:
         """Create a new chunk with the given proposition."""
-        chunk_id = str(uuid.uuid4())[:self.id_truncate_limit]
+        # ✅ FIX: Use hex for clean alphanumeric IDs (no dashes)
+        chunk_id = uuid.uuid4().hex[:self.id_truncate_limit]
         summary = self._get_new_chunk_summary(proposition)
         title = self._get_new_chunk_title(summary)
         
         # Check if proposition has images
         has_images = bool(re.search(r'!\[[^\]]*\]\([^)]+\)', proposition))
         
+        # ✅ FIX: Use counter for stable indexing
+        self._chunk_counter += 1
+        
         self.chunks[chunk_id] = {
             'chunk_id': chunk_id,
             'propositions': [proposition],
             'title': title,
             'summary': summary,
-            'chunk_index': len(self.chunks),
+            'chunk_index': self._chunk_counter,  # ✅ FIX: Stable index
             'has_images': has_images,
             'section_h1': kwargs.get('section_h1'),
             'section_h2': kwargs.get('section_h2')
@@ -230,13 +263,19 @@ Sadece başlığı yaz, başka hiçbir şey yazma."""),
         
         return chunk_id
     
-    def _get_chunk_outline(self) -> str:
-        """Get string representation of current chunks for LLM context."""
-        if not self.chunks:
+    def _get_chunk_outline(self, chunks_dict: Optional[Dict[str, Any]] = None) -> str:
+        """Get string representation of chunks for LLM context.
+        
+        Args:
+            chunks_dict: Optional filtered chunks dict. If None, uses all chunks.
+        """
+        target_chunks = chunks_dict if chunks_dict is not None else self.chunks
+        
+        if not target_chunks:
             return "No chunks yet."
         
         outline = ""
-        for chunk_id, chunk in self.chunks.items():
+        for chunk_id, chunk in target_chunks.items():
             outline += f"Chunk ID: {chunk_id}\n"
             outline += f"Title: {chunk['title']}\n"
             outline += f"Summary: {chunk['summary']}\n\n"
@@ -254,9 +293,38 @@ Sadece başlığı yaz, başka hiçbir şey yazma."""),
         if is_image_only and self.chunks:
             # Son oluşturulan chunk'ı bul (en yüksek index)
             last_chunk_id = max(self.chunks.keys(), key=lambda k: self.chunks[k].get('chunk_index', 0))
-            if self.print_logging:
-                logger.info(f"[AgenticChunker] Image auto-assigned to last chunk: {last_chunk_id}")
-            return last_chunk_id
+            last_chunk = self.chunks[last_chunk_id]
+            
+            # ✅ FIX: Section kontrolü - Görsel farklı section'daysa yeni chunk aç
+            # Bu, PDF'den gelen görsellerin yanlış chunk'a eklenmesini engeller
+            current_size = sum(len(p) for p in last_chunk['propositions'])
+            if current_size + len(proposition) <= 1800:  # Size limit
+                if self.print_logging:
+                    logger.info(f"[AgenticChunker] Image auto-assigned to last chunk: {last_chunk_id}")
+                return last_chunk_id
+            else:
+                if self.print_logging:
+                    logger.info(f"[AgenticChunker] Image would exceed size, creating new chunk")
+                return None
+        
+        # ✅ SIZE-BASED SAFETY: Pre-filter oversized chunks
+        if self.chunks:
+            available_chunks = {}
+            for chunk_id, chunk in self.chunks.items():
+                chunk_size = sum(len(p) for p in chunk['propositions'])
+                if chunk_size + len(proposition) > 1800:
+                    if self.print_logging:
+                        logger.info(f"[AgenticChunker] Chunk {chunk_id} ({chunk_size} chars) would exceed 1800, skipping")
+                else:
+                    available_chunks[chunk_id] = chunk
+            
+            # If NO chunks are available (all oversized), force new chunk
+            if not available_chunks:
+                if self.print_logging:
+                    logger.info(f"[AgenticChunker] All chunks oversized, forcing NEW_CHUNK")
+                return None
+        else:
+            available_chunks = {}
         
         # H4 BAŞLIK KONTROLÜ: H4 başlıklar (####) MUTLAKA yeni chunk olmalı
         # Bu algoritmalar, yöntemler gibi farklı konuları ayırır
@@ -266,7 +334,8 @@ Sadece başlığı yaz, başka hiçbir şey yazma."""),
                 logger.info(f"[AgenticChunker] H4 header detected, forcing NEW_CHUNK")
             return None  # Force new chunk
         
-        current_outline = self._get_chunk_outline()
+        # ✅ Sadece available_chunks için outline göster (oversized olanlar hariç)
+        current_outline = self._get_chunk_outline(available_chunks)
         
         PROMPT = ChatPromptTemplate.from_messages([
             ("system", """Determine if the new content should belong to an existing chunk.
@@ -313,13 +382,13 @@ Which chunk ID should this go to? (respond with ID only, or NEW_CHUNK)""")
             if response == "NEW_CHUNK" or response.lower() == "new_chunk":
                 return None
             
-            # Extract chunk ID (handle LLM adding extra text)
-            for chunk_id in self.chunks.keys():
+            # ✅ FIX: Only match against available_chunks (not oversized ones)
+            for chunk_id in available_chunks.keys():
                 if chunk_id in response:
                     return chunk_id
             
-            # If response length matches ID format, try it
-            if len(response) == self.id_truncate_limit and response in self.chunks:
+            # If response length matches ID format, try it (only in available)
+            if len(response) == self.id_truncate_limit and response in available_chunks:
                 return response
             
             return None
@@ -352,6 +421,22 @@ Which chunk ID should this go to? (respond with ID only, or NEW_CHUNK)""")
             # Check for images in combined content
             has_images = bool(re.search(r'!\[[^\]]*\]\([^)]+\)', content))
             
+            # ✅ YENİ: Cross-references ve table count
+            cross_refs = self._find_cross_references(content)
+            table_count = self._count_tables(content)
+            
+            # ✅ YENİ - Daha detaylı log
+            first_line = content.split('\n')[0][:60] if content else ''
+            refs_str = f" | Refs: {cross_refs}" if cross_refs else ""
+            tables_str = f" | Tables: {table_count}" if table_count > 0 else ""
+            logger.info(
+                f"[CHUNK {chunk_id}] "
+                f"Title: '{chunk['title'][:50]}' | "  # ✅ FIX: Increased from 40 to 50
+                f"Size: {len(content)} chars | "
+                f"Images: {has_images}{refs_str}{tables_str} | "
+                f"First: '{first_line}...'"
+            )
+            
             doc = Document(
                 page_content=content,  # ✅ Artık header içeriyor
                 metadata={
@@ -362,12 +447,50 @@ Which chunk ID should this go to? (respond with ID only, or NEW_CHUNK)""")
                     "chunk_index": chunk['chunk_index'],
                     "has_images": has_images,
                     "section_h1": chunk.get('section_h1'),
-                    "section_h2": chunk.get('section_h2')
+                    "section_h2": chunk.get('section_h2'),
+                    # ✅ FIX: ChromaDB doesn't support list - convert to comma-separated string
+                    "cross_references": ", ".join(cross_refs) if cross_refs else "",
+                    "table_count": table_count,
                 }
             )
             documents.append(doc)
         
         return documents
+    
+    def _find_cross_references(self, content: str) -> List[str]:
+        """Find figure/table references in content (TR/EN support)."""
+        if not content:
+            return []
+        try:
+            patterns = [
+                r'Şekil\s*\d+', r'Tablo\s*\d+',
+                r'Figure\s*\d+', r'Table\s*\d+',
+                r'Grafik\s*\d+', r'Chart\s*\d+',
+            ]
+            refs = []
+            for pattern in patterns:
+                refs.extend(re.findall(pattern, content, re.IGNORECASE))
+            # Deduplicate
+            seen = set()
+            unique = []
+            for ref in refs:
+                key = ref.strip().lower()
+                if key not in seen:
+                    seen.add(key)
+                    unique.append(ref.strip().title())
+            return unique
+        except Exception:
+            return []
+    
+    def _count_tables(self, content: str) -> int:
+        """Count markdown tables in content."""
+        if not content:
+            return 0
+        try:
+            # Count separator rows (|---|---|)
+            return len(re.findall(r'^\s*\|[\s\-:]+\|', content, re.MULTILINE))
+        except Exception:
+            return 0
     
     def get_chunks_list(self) -> List[str]:
         """Get chunks as list of strings."""
