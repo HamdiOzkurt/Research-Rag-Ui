@@ -586,7 +586,7 @@ def load_docx(file_path: str) -> str:
                 image_path.write_bytes(image_data)
                 
                 # Store RELATIVE path (like PDF does) - Critical: No leading slash
-                relative_path = f"{images_folder.name}/{image_filename}"
+                relative_path = f"uploads/{images_folder.name}/{image_filename}"
                 image_map[rel_id] = relative_path
                 image_counter += 1
             except Exception as e:
