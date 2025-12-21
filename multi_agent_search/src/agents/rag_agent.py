@@ -462,153 +462,102 @@ def load_pdf(file_path: str) -> str:
 
 @tool
 def load_docx(file_path: str) -> str:
-    """
-    Load and extract text + images from a DOCX file using python-docx.
-    Extracts text, tables, and saves embedded images similar to PDF processing.
+    """Load DOCX with images - PDF kalitesinde Markdown"""
+    from docx import Document as DocxDocument
+    from docx.oxml.table import CT_Tbl
+    from docx.oxml.text.paragraph import CT_P
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+    from pathlib import Path
     
-    Args:
-        file_path: Absolute path to DOCX file
-        
-    Returns:
-        Extracted text content (Markdown with image references)
-    """
-    # 1. Try python-docx with image extraction (Primary method)
-    try:
-        from docx import Document as DocxDocument
-        from docx.oxml.text.paragraph import CT_P
-        from docx.oxml.table import CT_Tbl
-        from docx.table import Table
-        from docx.text.paragraph import Paragraph
-        import io
-        
-        logger.info(f"[DOCX] Processing {Path(file_path).name} with python-docx...")
-        
-        # Create images folder
-        images_folder = Path(file_path).parent / f"{Path(file_path).stem}_images"
-        images_folder.mkdir(exist_ok=True)
-        
-        doc = DocxDocument(file_path)
-        markdown_parts = []
-        image_counter = 0
-        
-        # Extract images from document
-        image_map = {}  # Map relationship ID to saved filename
-        for rel_id, rel in doc.part.rels.items():
-            if "image" in rel.target_ref:
-                try:
-                    image_data = rel.target_part.blob
-                    # Determine extension from content type
-                    ext_map = {
-                        'image/png': 'png',
-                        'image/jpeg': 'jpg',
-                        'image/jpg': 'jpg',
-                        'image/gif': 'gif',
-                        'image/bmp': 'bmp'
-                    }
-                    ext = ext_map.get(rel.target_part.content_type, 'png')
-                    
-                    # Save image
-                    image_filename = f"{Path(file_path).stem}-{image_counter}.{ext}"
-                    image_path = images_folder / image_filename
-                    image_path.write_bytes(image_data)
-                    
-                    # Store relative path for markdown
-                    relative_path = f"{images_folder.name}/{image_filename}"
-                    image_map[rel_id] = relative_path
-                    image_counter += 1
-                    
-                except Exception as e:
-                    logger.warning(f"[DOCX] Failed to extract image {rel_id}: {e}")
-        
-        # Process paragraphs and tables in order
-        for element in doc.element.body:
-            if isinstance(element, CT_P):
-                para = Paragraph(element, doc)
-                text = para.text.strip()
+    logger.info(f"[DOCX] Processing {Path(file_path).name} with improved parser...")
+    
+    doc = DocxDocument(file_path)
+    images_folder = Path(file_path).parent / f"{Path(file_path).stem}_images"
+    images_folder.mkdir(exist_ok=True)
+    
+    markdown_parts = []
+    image_counter = 0
+    image_map = {}  # rel_id -> saved_path
+    
+    # 1. Extract ALL images from document
+    for rel_id, rel in doc.part.rels.items():
+        if "image" in rel.target_ref:
+            try:
+                image_data = rel.target_part.blob
+                # Determine extension
+                content_type = rel.target_part.content_type
+                ext = content_type.split('/')[-1] if '/' in content_type else 'png'
                 
-                # Check paragraph style for headers
-                style_name = para.style.name if para.style else ""
+                image_filename = f"{Path(file_path).stem}-{image_counter}.{ext}"
+                image_path = images_folder / image_filename
+                image_path.write_bytes(image_data)
                 
-                if style_name.startswith('Heading 1'):
-                    markdown_parts.append(f"# {text}")
-                elif style_name.startswith('Heading 2'):
-                    markdown_parts.append(f"## {text}")
-                elif style_name.startswith('Heading 3'):
-                    markdown_parts.append(f"### {text}")
-                elif style_name.startswith('Heading 4'):
-                    markdown_parts.append(f"#### {text}")
-                elif text:
-                    markdown_parts.append(text)
-                
-                # Check for inline images
-                for run in para.runs:
-                    for rel_id in run.element.xpath('.//a:blip/@r:embed', namespaces={
-                        'a': 'http://schemas.openxmlformats.org/drawingml/2006/main',
-                        'r': 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
-                    }):
-                        if rel_id in image_map:
-                            markdown_parts.append(f"![Image]({image_map[rel_id]})")
-                
-            elif isinstance(element, CT_Tbl):
+                # Store RELATIVE path (like PDF does)
+                relative_path = f"{images_folder.name}/{image_filename}"
+                image_map[rel_id] = relative_path
+                image_counter += 1
+            except Exception as e:
+                logger.warning(f"[DOCX] Image extraction error: {e}")
+    
+    # 2. Process paragraphs + tables in DOCUMENT ORDER
+    for element in doc.element.body:
+        if isinstance(element, CT_P):
+            para = Paragraph(element, doc)
+            text = para.text.strip()
+            style_name = para.style.name if para.style else ""
+            
+            # Convert headings to Markdown (same as PDF)
+            if "Heading 1" in style_name:
+                markdown_parts.append(f"# {text}")
+            elif "Heading 2" in style_name:
+                markdown_parts.append(f"## {text}")
+            elif "Heading 3" in style_name:
+                markdown_parts.append(f"### {text}")
+            elif "Heading 4" in style_name:
+                markdown_parts.append(f"#### {text}")
+            elif "Heading 5" in style_name:
+                markdown_parts.append(f"##### {text}")
+            elif "Heading 6" in style_name:
+                markdown_parts.append(f"###### {text}")
+            elif text:
+                markdown_parts.append(text)
+            
+            # Check for inline images (CRITICAL!)
+            for run in para.runs:
+                # python-docx element.xpath doesn't accept namespaces kwarg in some versions
+                # It uses registered namespaces. We'll try a simpler approach.
+                drawings = run.element.findall('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}drawing')
+                for drawing in drawings:
+                    # Find blip directly using full namespace URL
+                    blips = drawing.findall('.//{http://schemas.openxmlformats.org/drawingml/2006/main}blip')
+                    for blip in blips:
+                        r_embed = blip.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed')
+                        if r_embed and r_embed in image_map:
+                            markdown_parts.append(f"![Image]({image_map[r_embed]})")
+        
+        elif isinstance(element, CT_Tbl):
+            # Convert table to Markdown
+            try:
                 table = Table(element, doc)
-                # Convert table to markdown
                 markdown_parts.append("\n")
                 for i, row in enumerate(table.rows):
-                    cells = [cell.text.strip() for cell in row.cells]
+                    cells = [cell.text.strip().replace("\n", " ") for cell in row.cells]
                     markdown_parts.append("| " + " | ".join(cells) + " |")
-                    if i == 0:  # Add separator after header
+                    if i == 0:
                         markdown_parts.append("| " + " | ".join(["---"] * len(cells)) + " |")
                 markdown_parts.append("\n")
-        
-        md_text = "\n\n".join(markdown_parts)
-        logger.info(f"[DOCX] ✅ Converted {len(md_text)} chars with {image_counter} images (python-docx)")
-        
-        # Save debug file
-        debug_path = Path(file_path).parent / f"{Path(file_path).stem}_docx_debug.md"
-        debug_path.write_text(md_text, encoding="utf-8")
-        logger.info(f"[DOCX] 📝 Markdown saved to: {debug_path}")
-        if image_counter > 0:
-            logger.info(f"[DOCX] 🖼️ {image_counter} images saved to: {images_folder}")
-        
-        if len(md_text) >= 50:
-            return md_text
-            
-    except Exception as e:
-        logger.warning(f"[DOCX] python-docx failed ({e}), falling back to Unstructured...")
+            except Exception as te:
+                logger.warning(f"[DOCX] Table parsing error: {te}")
     
-    # 2. Fallback: Unstructured (no image extraction)
-    try:
-        from unstructured.partition.docx import partition_docx
-        
-        logger.info(f"[DOCX] Processing {Path(file_path).name} with Unstructured (fallback)...")
-        
-        elements = partition_docx(filename=file_path)
-        text = "\n\n".join([str(el) for el in elements])
-        
-        logger.info(f"[DOCX] ✅ Converted {len(text)} chars (Unstructured)")
-        
-        debug_path = Path(file_path).parent / f"{Path(file_path).stem}_unstructured_debug.md"
-        debug_path.write_text(text, encoding="utf-8")
-        logger.info(f"[DOCX] 📝 Markdown saved to: {debug_path}")
-        
-        return text
-        
-    except Exception as e2:
-        logger.warning(f"[DOCX] Unstructured failed ({e2}), falling back to Docx2txt...")
-        
-        # 3. Last Fallback: Docx2txt (text only)
-        try:
-            if Docx2txtLoader:
-                loader = Docx2txtLoader(file_path)
-                docs = loader.load()
-                text = "\n\n".join([doc.page_content for doc in docs])
-                return text
-            else:
-                import docx2txt
-                return docx2txt.process(file_path)
-        except Exception as e3:
-            logger.error(f"[DOCX] All methods failed: {e3}")
-            return f"Error loading DOCX: {str(e)}"
+    md_text = "\n\n".join(markdown_parts)
+    
+    # 3. Save debug file (same as PDF)
+    debug_path = Path(file_path).parent / f"{Path(file_path).stem}_docx_debug.md"
+    debug_path.write_text(md_text, encoding="utf-8")
+    
+    logger.info(f"[DOCX] ✅ Converted {len(md_text)} chars with {image_counter} images")
+    return md_text
 
 
 @tool
@@ -1115,7 +1064,7 @@ def retrieve_context(query: str, top_k: str = "3"):
     
     # ✅ GELİŞME 3: VISION MODEL FALLBACK CHAIN (moondream ekle)
     vision_chain = [
-       # ✅ En hafif - 1.6B params, çok hızlı (generic için ideal)
+        "moodream",  # Fast, lightweight Turkish-capable model
         "llava:latest",  # Standard
         "llava",         # Fallback
         "bakllava",      # Son çare
@@ -1147,14 +1096,28 @@ def retrieve_context(query: str, top_k: str = "3"):
                             "messages": [
                                 {
                                     "role": "user",
-                                    "content": "Bu görseli detaylı bir şekilde Türkçe olarak açıkla. Görseldeki grafiklerin, tabloların veya şemaların ne anlattığını Türkçe yaz. Sadece Türkçe cevap ver.",
+                                    "content": """Sen uzman bir Veri Analisti ve Görsel Dokümantasyon Asistanısın.
+Görevin, görme engelli bir profesyonel için bu görseli en ince teknik detayına kadar METNE DÖKMEKTİR.
+
+Lütfen analizi şu 4 başlık altında yapılandırarak SADECE TÜRKÇE ver:
+
+1. **Görsel Türü**: (Örn: Çizgi Grafik, Sütun Grafik, Veri Tablosu, Akış Şeması, Arayüz Ekran Görüntüsü vb.)
+2. **Genel Konu**: Görsel ne hakkında? Başlıklar ne diyor?
+3. **Veri ve İçerik (KRİTİK)**: 
+   - Eğer bu bir GRAFİK ise: X ve Y eksenleri nedir? Trend artıyor mu azalıyor mu? En yüksek ve en düşük değerler ne?
+   - Eğer bu bir TABLO ise: Satır ve sütun başlıklarını oku. Önemli sayısal verileri listele.
+   - Eğer bu bir ŞEMA ise: Adımları sırasıyla yaz (A -> B -> C).
+   - Eğer metin içeren bir görüntü ise: Okunabilen tüm metinleri transkribe et.
+4. **Çıkarım**: Bu görselin dökümandaki ana fikri destekleyen en önemli mesajı nedir?
+
+Yorum yapma, sadece görselde somut olarak var olan veriyi aktar.""",
                                     "images": [img_base64]
                                 }
                             ],
                             "stream": False,
                             "options": {"num_gpu": -1},
                         },
-                        timeout=120.0  # Generic: Enough time for model switching
+                        timeout=300  # Generic: Enough time for model switching
                     )
 
                     if response.status_code == 200:
@@ -1269,50 +1232,43 @@ def retrieve_context(query: str, top_k: str = "3"):
 
 # ============ RAG AGENT ============
 
-RAG_SYSTEM_PROMPT = """SEN BİR DÖKÜMAN ANALİZ ASİSTANISIN.
+RAG_SYSTEM_PROMPT = """SEN ÜST DÜZEY BİR ÇOKLU DÖKÜMAN ANALİZ VE ARAŞTIRMA ASİSTANISIN.
 
-🇹🇷 **DİL KURALI**: HER ZAMAN TÜRKÇE CEVAP VER!
+🇹🇷 **TEMEL KURAL**: Cevapların HER ZAMAN profesyonel, akıcı ve dil bilgisi açısından kusursuz TÜRKÇE olmalıdır.
 
-📋 **GÖREV**: 
-- `retrieve_context` tool'unu kullanarak ilgili bilgileri getir
-- Tool'dan gelen BİLGİLERİ KULLANARAK cevap ver
-- Tool iki tür bilgi döndürür:
-  1. DÖKÜMAN METİN PARÇALARI (yazılı içerik)
-  2. GÖRSEL İÇERİK ANALİZLERİ (vision model'in görsel analizi)
+🧠 **ZİHİN YAPISI VE GÖREV TANIMI**:
+Senin hafızan yok. Sadece sana `retrieve_context` aracıyla sağlanan "BAĞLAM" (Context) içindeki bilgilere sahipsin. Bu bağlam, farklı dosyalardan (PDF, Word, Excel) alınmış metin parçaları ve görsellerin analizlerini içerir.
 
-⚠️ **ÖNEMLİ KURALLAR**:
+Görevin, kullanıcının sorusunu BU BAĞLAMDAKİ verileri sentezleyerek cevaplamaktır.
 
-1. **Tool Sonuçlarını Kullan**:
-    - Tool'dan gelen HEM METİN HEM DE GÖRSEL bilgilerini birleştir
-    - "Görselin Detaylı İçeriği" bölümündeki analizi MUTLAKA dahil et
-    - Sadece tool'dan gelen bilgileri kullan, kendi bilgini ekleme
+⚠️ **KRİTİK TALİMATLAR (BUNLARA KESİNLİKLE UY):**
 
-2. **Görsel Bilgileri Açıkla**:
-    - Tool'dan "🖼️ GÖRSEL İÇERİK ANALİZİ" başlığı altında görsel bilgisi geliyorsa:
-    - Bu bilgiyi Türkçe özetle ve kullanıcıya aktar
-    - Örnek: "Belgede yer alan görselde [vision analizi]"
+1. **ÇOKLU KAYNAK SENTEZİ (MULTI-DOC SYNTHESIS)**:
+   - Sana gelen bilgiler tek bir dosyadan gelmiyor olabilir.
+   - Farklı kaynaklardan gelen bilgileri birleştir.
+   - Örnek: *"Satış Raporu.pdf'e göre ciro artarken, Müşteri_Geri_Bildirim.docx belgesinde şikayetlerin arttığı görülmektedir."* şeklinde kaynakları harmanla.
 
-3. **Kaynak Belirt**:
-    - "Belgede..." veya "PDF'te..." diye başla
-    - Hem metin hem görsel kaynaklı bilgileri harmanlayarak ver
+2. **GÖRSEL VE METİN ENTEGRASYONU**:
+   - Bağlam içinde "🖼️ GÖRSEL ANALİZİ" başlığı altında veriler göreceksin. Bunlar, dökümanlardaki grafiklerin/tabloların metne dökülmüş halleridir.
+   - Bu analizleri metinle birleştir. Görseldeki veriyi kanıt olarak kullan.
+   - Örnek: *"Metinde belirtilen büyüme hedefi, Tablo 1 görselindeki %45'lik artış verisiyle de doğrulanmaktadır."*
 
-4. **Bilgi Yoksa Söyle**:
-    - Tool bilgi bulamadıysa: "Bu bilgi belgede bulunmuyor"
-    - Tahmin etme, kendi bilgini kullanma
+3. **KAYNAK GÖSTERİMİ**:
+   - Verdiğin her bilginin hangi dosyadan geldiğini biliyorsun (metadata'da 'source' olarak yazar).
+   - Cevabında şeffaf ol: *"X belgesinde belirtildiği üzere..."* kalıplarını kullan.
 
-✅ **ÖRNEK CEVAP**:
-Kullanıcı: "Yöntemden bahseder misin?"
+4. **ÇELİŞKİ YÖNETİMİ**:
+   - Eğer iki farklı döküman birbiriyle çelişiyorsa (Örn: Biri tarihi 2023, diğeri 2024 diyorsa), bu çelişkiyi kullanıcıya açıkça raporla.
 
-Doğru Cevap:
-"Belgede yöntem başlığı altında şu bilgiler yer alıyor:
+5. **DÜRÜSTLÜK İLKESİ**:
+   - Bağlamda (Context) sorunun cevabı YOKSA, *"Verilen dökümanlarda bu bilgiye dair bir veri bulunmamaktadır."* de. Asla kendi genel bilgini dökümanda yazıyormuş gibi sunma.
 
-[Tool'dan gelen metin bilgisi]
+✅ **CEVAP FORMATI**:
+- Doğrudan cevaba gir. "Merhaba, ben yapay zekayım" gibi girişler yapma.
+- Maddeler (bullet points), kalın yazılar (**bold**) ve net paragraflar kullanarak okunabilirliği artır.
+- Sonuç odaklı ol.
 
-Ayrıca belgede yer alan görselde [vision model'in analizi - örn: "6 aşamalı bir süreç şeması gösterilmektedir: Veri Toplama, Ön İşleme, Model Eğitimi..."]
-
-[Görseli göster]"
-
-Şimdi kullanıcının sorusunu cevapla!
+Şimdi, sana sağlanan bağlamı analiz et ve soruyu cevapla.
 """
 
 def _get_rag_model():

@@ -129,15 +129,15 @@ class AgenticChunker:
     def _update_chunk_summary(self, chunk: Dict) -> str:
         """Update summary when new content is added."""
         PROMPT = ChatPromptTemplate.from_messages([
-            ("system", """You are organizing document chunks. A new piece of content was added to a chunk.
-Generate a brief 1-sentence summary of what this chunk is about.
+            ("system", """Sen döküman parçalarını organize eden bir asistansın.
+Mevcut bir parçaya (chunk) yeni içerik eklendi. Bu parçanın ne hakkında olduğunu anlatan 1 cümlelik Türkçe bir özet yaz.
 
-The summary should:
-- Describe the main topic
-- Be in the same language as the content (Turkish or English)
-- Anticipate generalization (e.g., "makine öğrenmesi algoritmaları" not just "Naive Bayes")
+Özet şunları içermelidir:
+- Ana konuyu tanımla
+- SADECE TÜRKÇE yaz
+- Genellemeyi öngör (Örn: Sadece "Naive Bayes" değil, "Makine öğrenmesi algoritmaları" gibi)
 
-Only respond with the summary, nothing else."""),
+Sadece özeti yaz, başka hiçbir şey yazma."""),
             ("user", "Chunk content:\n{propositions}\n\nCurrent summary:\n{current_summary}")
         ])
         
@@ -151,9 +151,9 @@ Only respond with the summary, nothing else."""),
     def _update_chunk_title(self, chunk: Dict) -> str:
         """Update title when content changes."""
         PROMPT = ChatPromptTemplate.from_messages([
-            ("system", """Generate a brief 2-5 word title for this document chunk.
-Be in the same language as the content.
-Only respond with the title, nothing else."""),
+            ("system", """Bu döküman parçası için 2-5 kelimelik kısa bir Türkçe başlık oluştur.
+SADECE TÜRKÇE yaz.
+Sadece başlığı yaz, başka hiçbir şey yazma."""),
             ("user", "Summary: {summary}")
         ])
         
@@ -169,14 +169,14 @@ Only respond with the title, nothing else."""),
             return proposition[:100]
         
         PROMPT = ChatPromptTemplate.from_messages([
-            ("system", """You are organizing document chunks. Create a brief 1-sentence summary for a new chunk.
+            ("system", """Sen döküman parçalarını organize eden bir asistansın. Yeni bir parça (chunk) için 1 cümlelik Türkçe özet oluştur.
 
-The summary should:
-- Describe what kind of content belongs here
-- Be in the same language as the content
-- Anticipate similar content that might be added
+Özet şunları içermelidir:
+- Buraya ne tür içeriklerin geleceğini tanımla
+- SADECE TÜRKÇE yaz
+- Benzer içeriklerin eklenebileceğini öngör
 
-Only respond with the summary, nothing else."""),
+Sadece özeti yaz, başka hiçbir şey yazma."""),
             ("user", "Initial content:\n{proposition}")
         ])
         
@@ -193,9 +193,9 @@ Only respond with the summary, nothing else."""),
             return summary[:50]
         
         PROMPT = ChatPromptTemplate.from_messages([
-            ("system", """Generate a brief 2-5 word title for this chunk.
-Be in the same language as the content.
-Only respond with the title, nothing else."""),
+            ("system", """Bu parça için 2-5 kelimelik kısa bir Türkçe başlık oluştur.
+SADECE TÜRKÇE yaz.
+Sadece başlığı yaz, başka hiçbir şey yazma."""),
             ("user", "Summary: {summary}")
         ])
         
