@@ -97,6 +97,84 @@ def _uploads_dir() -> Path:
 
 _INGESTED_SOURCES_FILE = _uploads_dir() / ".rag_ingested_sources.json"
 
+import re
+from collections import Counter
+
+def _extract_section_from_content(content: str) -> dict:
+    """
+    Extract section metadata from content if it has [Bölüm: X | Alt Bölüm: Y] header.
+    
+    Returns dict with section_h1, section_h2 keys (or empty dict)
+    """
+    import re
+    # Match pattern: [Bölüm: X | Alt Bölüm: Y] or [Bölüm: X]
+    header_match = re.match(r'^\[([^\]]+)\]', content.strip())
+    if not header_match:
+        return {}
+    
+    header_text = header_match.group(1)
+    metadata = {}
+    
+    # Extract H1 (Bölüm)
+    h1_match = re.search(r'Bölüm:\s*([^|]+)', header_text)
+    if h1_match:
+        metadata['section_h1'] = h1_match.group(1).strip()
+    
+    # Extract H2 (Alt Bölüm)
+    h2_match = re.search(r'Alt Bölüm:\s*(.+)', header_text)
+    if h2_match:
+        metadata['section_h2'] = h2_match.group(1).strip()
+    
+    return metadata
+
+
+def _detect_boilerplate(chunks: List[str], threshold: float = 0.7) -> List[str]:
+    """
+    Detect and return boilerplate patterns that appear in >70% of chunks.
+    """
+    if len(chunks) < 3:  # Too few chunks, skip detection
+        return []
+    
+    short_lines = []
+    for chunk in chunks:
+        lines = chunk.split('\n')
+        for line in lines:
+            line = line.strip()
+            if 5 < len(line) < 100 and '![' not in line:
+                normalized = re.sub(r'\d+', 'N', line.lower())
+                short_lines.append(normalized)
+    
+    if not short_lines:
+        return []
+    
+    line_counts = Counter(short_lines)
+    total_chunks = len(chunks)
+    
+    boilerplate = []
+    for pattern, count in line_counts.items():
+        frequency = count / total_chunks
+        if frequency > threshold:
+            boilerplate.append(pattern)
+            logger.info(f"[BOILERPLATE] Detected: '{pattern[:50]}...' (appears {frequency:.0%})")
+    
+    return boilerplate
+
+
+def _clean_boilerplate(text: str, boilerplate_patterns: List[str]) -> str:
+    """Remove boilerplate patterns from text."""
+    if not boilerplate_patterns:
+        return text
+    
+    lines = text.split('\n')
+    cleaned_lines = []
+    
+    for line in lines:
+        normalized = re.sub(r'\d+', 'N', line.strip().lower())
+        if normalized not in boilerplate_patterns:
+            cleaned_lines.append(line)
+    
+    return '\n'.join(cleaned_lines)
+
 
 def _load_ingested_sources() -> None:
     """Load ingested sources from disk (and optionally Supabase if configured).
@@ -288,6 +366,8 @@ def _make_rag_splits(text: str, source_name: str) -> List[Document]:
         for s in splits:
             s.metadata["source"] = source_name
             s.metadata["has_images"] = False
+            # ✅ YENİ: Metadata Ayıkla
+            s.metadata.update(_extract_section_from_content(s.page_content))
         return splits
 
     # Markdown path
@@ -304,14 +384,24 @@ def _make_rag_splits(text: str, source_name: str) -> List[Document]:
 
             doc = Document(page_content=sub.strip(), metadata={"source": source_name})
 
-            # If a chunk is still too big (rare), gently split by paragraphs.
-            if len(doc.page_content) > 2000:
+            # ✅ DEĞİŞİKLİK: 2000 yerine 1800 (güvenlik payı)
+            if len(doc.page_content) > 1800:
                 for s in _fallback_splitter.split_documents([doc]):
                     s.metadata["source"] = source_name
                     s.metadata["has_images"] = bool(re.search(r"!\[[^\]]*\]\([^)]+\)", s.page_content))
+                    # ✅ YENİ: Metadata Ayıkla
+                    s.metadata.update(_extract_section_from_content(s.page_content))
+                    
+                    # ✅ YENİ: DOUBLE-CHECK
+                    if len(s.page_content) > 2000:
+                        logger.warning(f"[RAG] Forcing split for oversized chunk: {len(s.page_content)} chars")
+                        s.page_content = s.page_content[:2000] + "\n\n[...devamı kesildi]"
+                    
                     chunks.append(s)
             else:
                 doc.metadata["has_images"] = bool(re.search(r"!\[[^\]]*\]\([^)]+\)", doc.page_content))
+                # ✅ YENİ: Metadata Ayıkla
+                doc.metadata.update(_extract_section_from_content(doc.page_content))
                 chunks.append(doc)
 
     return chunks
@@ -481,9 +571,11 @@ def load_docx(file_path: str) -> str:
     image_map = {}  # rel_id -> saved_path
     
     # 1. Extract ALL images from document
+    image_count_debug = 0
     for rel_id, rel in doc.part.rels.items():
         if "image" in rel.target_ref:
             try:
+                image_count_debug += 1
                 image_data = rel.target_part.blob
                 # Determine extension
                 content_type = rel.target_part.content_type
@@ -493,12 +585,16 @@ def load_docx(file_path: str) -> str:
                 image_path = images_folder / image_filename
                 image_path.write_bytes(image_data)
                 
-                # Store RELATIVE path (like PDF does)
+                # Store RELATIVE path (like PDF does) - Critical: No leading slash
                 relative_path = f"{images_folder.name}/{image_filename}"
                 image_map[rel_id] = relative_path
                 image_counter += 1
             except Exception as e:
                 logger.warning(f"[DOCX] Image extraction error: {e}")
+    
+    logger.info(f"[DOCX DEBUG] Total images found in rels: {image_count_debug}")
+    if image_count_debug > 0 and image_counter == 0:
+        logger.warning("[DOCX DEBUG] ⚠️ Images found but none saved! Check extraction logic.")
     
     # 2. Process paragraphs + tables in DOCUMENT ORDER
     for element in doc.element.body:
@@ -679,17 +775,26 @@ async def analyze_image(file_path: str, prompt: str = "Bu görseli detaylı Tür
 def validate_chunk_quality(chunks: List[Document]) -> List[Document]:
     """
     Filter out low-quality chunks that hurt retrieval.
-    
-    Bad chunks:
-    - Too short (< 50 chars)
-    - Only whitespace/formatting
-    - Orphaned image references (image link but no text explanation nearby)
     """
     validated = []
     import re
     
+    # ✅ YENİ: Boilerplate Detection (tüm chunk'lara bak)
+    all_texts = [chunk.page_content for chunk in chunks]
+    boilerplate_patterns = _detect_boilerplate(all_texts, threshold=0.7)
+    
     for chunk in chunks:
         content = chunk.page_content.strip()
+        
+        # ✅ YENİ: Clean boilerplate
+        if boilerplate_patterns:
+            original_len = len(content)
+            content = _clean_boilerplate(content, boilerplate_patterns)
+            cleaned_len = len(content)
+            
+            if original_len > cleaned_len:
+                logger.info(f"[CLEAN] Removed {original_len - cleaned_len} chars of boilerplate")
+                chunk.page_content = content.strip()
         
         # Filter 1: Too short (likely formatting noise)
         if len(content) < 50 and not chunk.metadata.get("has_images", False):
@@ -1062,33 +1167,54 @@ def retrieve_context(query: str, top_k: str = "3"):
     
     logger.info(f"[RAG] ✅ Selected {len(best_images)} best images from {len(all_potential_images)} candidates")
     
-    # ✅ GELİŞME 3: VISION MODEL FALLBACK CHAIN (moondream ekle)
+    # ✅ GELİŞME 3: VISION MODEL KALİTE KAPISI (QUALITY GATE)
+    # Strateji: Önce hızlıyı dene (moondream). İyiyse dur. Kötüyse güçlüyü dene (llava). En iyiyi seç.
     vision_chain = [
-        "moodream",  # Fast, lightweight Turkish-capable model
-        "llava:latest",  # Standard
-        "llava",         # Fallback
-        "bakllava",      # Son çare
+        "moondream",     # Çok hızlı, 1.6B param
+        "llava:latest",  # Standart, daha yavaş ama detaylı
     ]
     
+    def calculate_quality_score(text):
+        """Görsel analizinin kalitesini 0.0 - 1.0 arasında puanla"""
+        if not text or len(text) < 10: return 0.0
+        
+        score = 0.0
+        text_lower = text.lower()
+        
+        # 1. Uzunluk (Çok kısa veya çok uzun şüpheli)
+        if 50 <= len(text) <= 800: score += 0.3
+        
+        # 2. Yapısal İşaretler (Prompt'a uydu mu?)
+        if any(x in text for x in ["Görsel Türü", "1.", "Veri:", "Çıkarım"]): score += 0.3
+        
+        # 3. Teknik Kelimeler (Grafik/Tablo okudu mu?)
+        tech_words = ["eksen", "yüzde", "%", "artış", "azalış", "sütun", "satır", "değer"]
+        if any(w in text_lower for w in tech_words): score += 0.2
+        
+        # 4. Halüsinasyon / Reddetme Kontrolü
+        negatives = ["göremiyorum", "metin yok", "sorry", "cannot analyze", "i can't"]
+        if any(n in text_lower for n in negatives): score -= 0.5
+        
+        return max(0.0, min(score, 1.0))
+
     # Seçilen görselleri analiz et
     for img_data in best_images:
         try:
-            logger.info(f"[RAG] 🖼️ Analyzing BEST image: {img_data['safe_path'].name} (Score: {img_data['score']})")
+            logger.info(f"[RAG] 🖼️ Analyzing BEST image: {img_data['safe_path'].name} (Relevance: {img_data['score']})")
             
             import httpx
             import base64
             
-            # Read and encode image
             with open(img_data['safe_path'], "rb") as img_file:
                 img_base64 = base64.b64encode(img_file.read()).decode("utf-8")
             
             ollama_url = settings.ollama_base_url
-            analysis = None
             
-            # ✅ Try vision chain (moondream first for speed)
+            candidates = [] # (score, analysis, model_name)
+            
             for vision_model in vision_chain:
                 try:
-                    logger.info(f"[RAG] Trying vision model: {vision_model}")
+                    logger.info(f"[RAG] ⚡ Trying model: {vision_model}")
                     response = httpx.post(
                         f"{ollama_url}/api/chat",
                         json={
@@ -1117,44 +1243,47 @@ Yorum yapma, sadece görselde somut olarak var olan veriyi aktar.""",
                             "stream": False,
                             "options": {"num_gpu": -1},
                         },
-                        timeout=300  # Generic: Enough time for model switching
+                        timeout=120.0 
                     )
 
                     if response.status_code == 200:
-                        response_data = response.json()
-                        analysis = response_data.get("message", {}).get("content", "")
-                        # ✅✅✅ BU SATIRLARI EKLEYİN ✅✅✅
-                        logger.info(f"[VISION RESPONSE] Model: {vision_model}")
-                        logger.info(f"[VISION RESPONSE] Status: SUCCESS")
-                        logger.info(f"[VISION RESPONSE] Length: {len(analysis)} chars")
-                        logger.info(f"[VISION RESPONSE] Full Content:")
-                        logger.info("=" * 80)
-                        logger.info(analysis)
-                        logger.info("=" * 80)
-
-                        if analysis and len(analysis.strip()) > 30:
-                            logger.info(f"[RAG] ✅ Vision SUCCESS with {vision_model}")
+                        analysis = response.json().get("message", {}).get("content", "")
+                        
+                        # Kaliteyi Puanla
+                        quality = calculate_quality_score(analysis)
+                        logger.info(f"[VISION GATE] Model: {vision_model} | Score: {quality:.2f} | Length: {len(analysis)}")
+                        
+                        candidates.append((quality, analysis, vision_model))
+                        
+                        # 🚀 FAST EXIT: Eğer puan yüksekse (>0.7), ikinci modeli deneme!
+                        if quality > 0.7:
+                            logger.info(f"[VISION GATE] 🎯 Excellent result from {vision_model}, stopping chain.")
                             break
-                        else:
-                            logger.warning(f"[RAG] ⚠️ {vision_model} returned empty/short response")
                     else:
-                        # ✅✅✅ HATA DURUMUNDA DA DETAY ✅✅✅
-                        logger.error(f"[VISION RESPONSE] Model: {vision_model}")
-                        logger.error(f"[VISION RESPONSE] Status: FAILED")
-                        logger.error(f"[VISION RESPONSE] HTTP Code: {response.status_code}")
-                        logger.error(f"[VISION RESPONSE] Response: {response.text}")
+                        logger.warning(f"[VISION GATE] {vision_model} failed (HTTP {response.status_code})")
+
                 except Exception as model_err:
-                    logger.warning(f"[RAG] ❌ {vision_model} failed: {model_err}")
+                    logger.warning(f"[VISION GATE] ❌ {vision_model} error: {model_err}")
                     continue
             
-            # Honest logging
-            vision_success = bool(analysis and len(analysis.strip()) > 30)
+            # En iyi sonucu seç
+            final_analysis = ""
+            vision_success = False
+            
+            if candidates:
+                # Puana göre sırala (en yüksek en başta)
+                candidates.sort(key=lambda x: x[0], reverse=True)
+                best_score, best_text, best_model = candidates[0]
+                
+                if best_score >= 0.3: # Kabul edilebilir eşik
+                    final_analysis = best_text
+                    vision_success = True
+                    logger.info(f"[RAG] ✅ Vision Winner: {best_model} (Score: {best_score:.2f})")
+                else:
+                    logger.warning(f"[RAG] ⚠️ All vision results were low quality (Best: {best_score:.2f})")
             
             if not vision_success:
-                analysis = f"Görsel: {img_data['safe_path'].name} (Vision model kullanılamıyor - grafik/tablo/diyagram olabilir)"
-                logger.warning(f"[RAG] ⚠️ Vision FAILED - using fallback")
-            else:
-                logger.info(f"[RAG] ✅ Vision SUCCESS")
+                final_analysis = f"Görsel: {img_data['safe_path'].name} (Otomatik analiz başarısız oldu veya düşük kaliteli)"
             
             image_url = f"{base_url}/{img_data['path'].lstrip('/')}"
             markdown_line = f"![{img_data['alt'] or 'Chart/Graph'}]({image_url})"
@@ -1163,7 +1292,7 @@ Yorum yapma, sadece görselde somut olarak var olan veriyi aktar.""",
                 "source": img_data['source'],
                 "filename": img_data['safe_path'].name,
                 "markdown": markdown_line,
-                "analysis": analysis,
+                "analysis": final_analysis,
                 "vision_success": vision_success,
                 "relevance_score": img_data['score'],
             })
@@ -1184,13 +1313,34 @@ Yorum yapma, sadece görselde somut olarak var olan veriyi aktar.""",
             lambda m: f'![{m.group(1)}]({base_url}/{m.group(2).lstrip("/")})',
             content
         )
-        processed_docs.append((doc.metadata.get('source', 'unknown'), content))
+        
+        # ✅ YENİ: Metadata'yı da kaydet
+        metadata = {
+            'source': doc.metadata.get('source', 'unknown'),
+            'section_h1': doc.metadata.get('section_h1'),
+            'section_h2': doc.metadata.get('section_h2'),
+        }
+        
+        processed_docs.append((metadata, content))
 
-    # Text context
-    text_context = "\n\n".join(
-        f"📄 Kaynak: {source}\n{content}"
-        for source, content in processed_docs
-    )
+    # ✅ YENİ: Text context - Metadata ile zenginleştir
+    text_context_parts = []
+    for metadata, content in processed_docs:
+        # Bölüm bilgisi varsa göster
+        header_info = []
+        if metadata.get('section_h1'):
+            header_info.append(f"Bölüm: {metadata['section_h1']}")
+        if metadata.get('section_h2'):
+            header_info.append(f"Alt Bölüm: {metadata['section_h2']}")
+        
+        if header_info:
+            context_header = f"📄 Kaynak: {metadata['source']} | {' | '.join(header_info)}\n{content}"
+        else:
+            context_header = f"📄 Kaynak: {metadata['source']}\n{content}"
+        
+        text_context_parts.append(context_header)
+
+    text_context = "\n\n".join(text_context_parts)
 
     # ✅ CRITICAL: Build combined context with images
     if image_blocks:

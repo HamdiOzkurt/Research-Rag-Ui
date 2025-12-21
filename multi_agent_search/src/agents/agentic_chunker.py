@@ -80,7 +80,7 @@ class AgenticChunker:
             if prop and prop.strip():
                 self.add_proposition(prop.strip())
     
-    def add_proposition(self, proposition: str) -> None:
+    def add_proposition(self, proposition: str, **kwargs) -> None:
         """Add a single text segment, placing it in the best chunk."""
         if not proposition.strip():
             return
@@ -90,12 +90,12 @@ class AgenticChunker:
         
         # If no LLM available, create individual chunks
         if not self.llm:
-            self._create_new_chunk(proposition)
+            self._create_new_chunk(proposition, **kwargs)
             return
         
         # First chunk - just create it
         if len(self.chunks) == 0:
-            self._create_new_chunk(proposition)
+            self._create_new_chunk(proposition, **kwargs)
             return
         
         # Find relevant existing chunk
@@ -104,19 +104,18 @@ class AgenticChunker:
         if chunk_id and chunk_id in self.chunks:
             self._add_proposition_to_chunk(chunk_id, proposition)
         else:
-            self._create_new_chunk(proposition)
+            self._create_new_chunk(proposition, **kwargs)
     
     def _add_proposition_to_chunk(self, chunk_id: str, proposition: str) -> None:
         """Add proposition to existing chunk and update metadata."""
-        # Check chunk size limit - prevent oversized chunks
+        # ✅ GELİŞME 1: HARD LIMIT (2000 Karakter)
         current_size = sum(len(p) for p in self.chunks[chunk_id]['propositions'])
-        if current_size + len(proposition) > 2500:
-            # Chunk too large, force new chunk instead
+        if current_size + len(proposition) > 2000:
             if self.print_logging:
-                logger.info(f"[AgenticChunker] Chunk {chunk_id} too large ({current_size} chars), creating new chunk")
+                logger.info(f"[AgenticChunker] Chunk {chunk_id} limit (2000) aşıldı, yeni chunk açılıyor.")
             self._create_new_chunk(proposition)
             return
-        
+            
         self.chunks[chunk_id]['propositions'].append(proposition)
         
         if self.generate_new_metadata_ind and self.llm:
@@ -206,7 +205,7 @@ Sadece başlığı yaz, başka hiçbir şey yazma."""),
             logger.warning(f"[AgenticChunker] Title generation failed: {e}")
             return summary[:50]
     
-    def _create_new_chunk(self, proposition: str) -> str:
+    def _create_new_chunk(self, proposition: str, **kwargs) -> str:
         """Create a new chunk with the given proposition."""
         chunk_id = str(uuid.uuid4())[:self.id_truncate_limit]
         summary = self._get_new_chunk_summary(proposition)
@@ -222,6 +221,8 @@ Sadece başlığı yaz, başka hiçbir şey yazma."""),
             'summary': summary,
             'chunk_index': len(self.chunks),
             'has_images': has_images,
+            'section_h1': kwargs.get('section_h1'),
+            'section_h2': kwargs.get('section_h2')
         }
         
         if self.print_logging:
@@ -333,13 +334,26 @@ Which chunk ID should this go to? (respond with ID only, or NEW_CHUNK)""")
         
         for chunk_id, chunk in self.chunks.items():
             # Combine all propositions in the chunk
-            content = "\n\n".join(chunk['propositions'])
+            raw_content = "\n\n".join(chunk['propositions'])
+            
+            # ✅ YENİ: Header Injection - Chunk başına metadata bilgisi ekle
+            header_parts = []
+            if chunk.get('section_h1'):
+                header_parts.append(f"Bölüm: {chunk['section_h1']}")
+            if chunk.get('section_h2'):
+                header_parts.append(f"Alt Bölüm: {chunk['section_h2']}")
+            
+            # Eğer header varsa, içeriğin başına ekle
+            content = raw_content
+            if header_parts:
+                header_text = " | ".join(header_parts)
+                content = f"[{header_text}]\n\n{raw_content}"
             
             # Check for images in combined content
             has_images = bool(re.search(r'!\[[^\]]*\]\([^)]+\)', content))
             
             doc = Document(
-                page_content=content,
+                page_content=content,  # ✅ Artık header içeriyor
                 metadata={
                     "source": self.source_name,
                     "chunk_id": chunk_id,
@@ -347,6 +361,8 @@ Which chunk ID should this go to? (respond with ID only, or NEW_CHUNK)""")
                     "summary": chunk['summary'],
                     "chunk_index": chunk['chunk_index'],
                     "has_images": has_images,
+                    "section_h1": chunk.get('section_h1'),
+                    "section_h2": chunk.get('section_h2')
                 }
             )
             documents.append(doc)
@@ -376,29 +392,91 @@ Which chunk ID should this go to? (respond with ID only, or NEW_CHUNK)""")
             print("-" * 40)
 
 
-def extract_propositions_from_markdown(markdown_text: str) -> List[str]:
+# ==========================================
+# ✅ MAIN EXTRACTION FUNCTION - FIXED
+# ==========================================
+
+def extract_propositions_from_markdown(markdown_text: str) -> List[Dict[str, Any]]:
     """
-    FIXED: Forward lookahead - görseller en yakın başlıkla birleştirilir.
+    Extract propositions with section tracking (Hierarchical Metadata).
     
-    Strategy (Generic for all document types):
-    1. Major headers (H1-H4) ile bölümlere ayır
-    2. Her bölüm içinde H5/H6 başlıklarını bul
-    3. H5/H6 başlıklardan sonraki 1-3 satırda görsel var mı kontrol et
-    4. Varsa görseli başlığa yapıştır
-    5. Büyük bölümleri akıllıca böl (>2500 char)
-    
-    Works for: PDF→Markdown, DOCX→Markdown, plain Markdown
+    Returns list of dicts: {'text': str, 'section_h1': str, 'section_h2': str}
     """
     if not markdown_text:
         return []
     
     text = markdown_text.replace("\r\n", "\n").replace("\r", "\n")
     
-    # Regex patterns
-    major_header_pattern = re.compile(r'^(#{1,4})\s+(.+)$', re.MULTILINE)
+    # Track current section headers
+    h1_pattern = re.compile(r'^#\s+(.+)$', re.MULTILINE)
+    h2_pattern = re.compile(r'^##\s+(.+)$', re.MULTILINE)
     
-    # Find all MAJOR headers (H1-H4)
+    # Extract all header positions
+    h1_headers = {m.start(): m.group(1).strip() for m in h1_pattern.finditer(text)}
+    h2_headers = {m.start(): m.group(1).strip() for m in h2_pattern.finditer(text)}
+    
+    # ✅ FIX: Use proper extraction (not simple paragraph split)
+    raw_props = _extract_propositions_with_headers(text)
+    
+    propositions_with_metadata = []
+    
+    current_pos = 0
+    for prop in raw_props:
+        clean_prop = prop.strip()
+        if not clean_prop:
+            continue
+            
+        found_pos = text.find(clean_prop[:50], current_pos)
+        if found_pos == -1:
+            found_pos = current_pos
+        else:
+            current_pos = found_pos
+        
+        # Find nearest H1 before this position
+        section_h1 = None
+        best_h1_pos = -1
+        for pos, title in h1_headers.items():
+            if pos < found_pos and pos > best_h1_pos:
+                section_h1 = title
+                best_h1_pos = pos
+        
+        # Find nearest H2 before this position
+        section_h2 = None
+        best_h2_pos = -1
+        for pos, title in h2_headers.items():
+            if pos < found_pos and pos > best_h2_pos:
+                section_h2 = title
+                best_h2_pos = pos
+        
+        # H2 is only valid if it's after the current H1 (hierarchical)
+        if best_h2_pos < best_h1_pos:
+            section_h2 = None
+            
+        propositions_with_metadata.append({
+            'text': prop,
+            'section_h1': section_h1,
+            'section_h2': section_h2
+        })
+        
+        current_pos += len(clean_prop)
+    
+    return propositions_with_metadata
+
+
+# ==========================================
+# ✅ NEW HELPER FUNCTIONS - PROPER LOGIC
+# ==========================================
+
+def _extract_propositions_with_headers(text: str) -> List[str]:
+    """
+    Extract propositions using major header splitting + image attachment.
+    
+    This is the PROPER extraction logic (was unreachable before).
+    """
+    # Find major headers (H1-H3)
+    major_header_pattern = re.compile(r'^(#{1,3})\s+.+', re.MULTILINE)
     major_headers = []
+    
     for match in major_header_pattern.finditer(text):
         level = len(match.group(1))
         major_headers.append({
@@ -429,13 +507,11 @@ def extract_propositions_from_markdown(markdown_text: str) -> List[str]:
         if not section_text:
             continue
         
-        # ✅ CRITICAL FIX: "Forward Image Attachment"
-        # Section içinde H5/H6 başlıkları varsa, her birini sonraki görselle birleştir
+        # Attach images to their H5/H6 headers
         processed_section = _attach_images_to_headers(section_text)
         
-        # ✅ CRITICAL: Split at H4 headers too (algorithms, methods)
-        # H4 başlıklar genelde farklı konular (algoritmalar, yöntemler)
-        h4_pattern = re.compile(r'^####\s+.+$', re.MULTILINE)
+        # Split at H4 headers (algorithms, methods)
+        h4_pattern = re.compile(r'^####\s+.+', re.MULTILINE)
         h4_matches = list(h4_pattern.finditer(processed_section))
         
         if not h4_matches:
@@ -468,27 +544,6 @@ def extract_propositions_from_markdown(markdown_text: str) -> List[str]:
 def _attach_images_to_headers(section_text: str) -> str:
     """
     ✅ FORWARD LOOKAHEAD: Attach images to their nearest H5/H6 headers.
-    
-    Example:
-    Input:
-        ##### Ridge Classifier
-        Açıklama...
-        
-        ![](ridge.png)
-        
-        ##### Naive Bayes
-        Açıklama...
-        
-        ![](naive.png)
-    
-    Output:
-        ##### Ridge Classifier
-        Açıklama...
-        ![](ridge.png)
-        
-        ##### Naive Bayes
-        Açıklama...
-        ![](naive.png)
     """
     lines = section_text.split("\n")
     result_lines = []
@@ -498,62 +553,47 @@ def _attach_images_to_headers(section_text: str) -> str:
     major_header_re = re.compile(r'^#{1,4}\s+.+$')
     
     i = 0
-    consumed_images = set()  # Track which lines we've already attached
+    consumed_images = set()
     
     while i < len(lines):
         line = lines[i]
         
-        # Check if current line is H5/H6
         if h5h6_re.match(line.strip()):
-            # Start collecting this header section
             header_section = [line]
             i += 1
             
-            # Collect next lines until we hit another header or end
             while i < len(lines):
                 next_line = lines[i]
                 
-                # Stop if we hit another H5/H6 or major header
                 if h5h6_re.match(next_line.strip()) or major_header_re.match(next_line.strip()):
                     break
                 
-                # Don't add if this is a consumed image
                 if i not in consumed_images:
                     header_section.append(next_line)
                 i += 1
             
-            # Now check if there's an orphan image in next few lines
-            # ✅ Dynamic lookahead - up to 10 lines or until empty line
+            # ✅ Dynamic lookahead - up to 10 lines
             lookahead_start = i
-            lookahead_end = min(i + 10, len(lines))  # Max 10 lines (was 3)
+            lookahead_end = min(i + 10, len(lines))
             
             for j in range(lookahead_start, lookahead_end):
                 line_content = lines[j].strip()
                 
-                # Stop at empty line (paragraph boundary)
                 if not line_content:
                     break
                 
-                # Stop at next header
                 if h5h6_re.match(line_content) or major_header_re.match(line_content):
                     break
                 
-                # Found orphan image - attach it
                 if image_re.match(line_content):
-                    if header_section and header_section[-1].strip():  # Add empty line if needed
+                    if header_section and header_section[-1].strip():
                         header_section.append("")
                     header_section.append(lines[j])
-                    
-                    # Mark this image as consumed
                     consumed_images.add(j)
-                    # Continue looking for more images in this block!
-
             
-            # Add this complete header section
             result_lines.extend(header_section)
         else:
-            # Regular line (not H5/H6 header)
-            if i not in consumed_images:  # Skip if it's a consumed image
+            if i not in consumed_images:
                 result_lines.append(line)
             i += 1
     
@@ -565,17 +605,12 @@ def _smart_split_with_images(text: str) -> List[str]:
     if len(text) <= 2500:
         return [text]
     
-    # Use paragraph-based splitting while keeping images attached
     return _split_large_section_preserve_images(text)
 
 
 def _split_large_section_preserve_images(text: str) -> List[str]:
     """
     Split large sections while preserving image attachments.
-    
-    - Splits on paragraph boundaries (double newline)
-    - Never splits an image from its preceding paragraph
-    - Keeps chunks under ~2000 chars
     """
     if len(text) <= 2500:
         return [text]
@@ -590,12 +625,7 @@ def _split_large_section_preserve_images(text: str) -> List[str]:
     for para in paragraphs:
         para_size = len(para)
         
-        # Check if this paragraph contains an image
-        has_image = bool(image_re.search(para))
-        
-        # If adding this would exceed limit AND we have content
         if current_size + para_size > 2000 and current_chunk:
-            # Save current chunk
             chunks.append("\n\n".join(current_chunk))
             current_chunk = [para]
             current_size = para_size
@@ -603,84 +633,8 @@ def _split_large_section_preserve_images(text: str) -> List[str]:
             current_chunk.append(para)
             current_size += para_size
     
-    # Don't forget last chunk
     if current_chunk:
         chunks.append("\n\n".join(current_chunk))
-    
-    return chunks
-
-
-def _build_header_context(headers: List[dict], current_idx: int) -> str:
-    """Build hierarchical context from parent headers."""
-    if current_idx == 0:
-        return ""
-    
-    current_level = headers[current_idx]['level']
-    context_parts = []
-    
-    # Look backwards for parent headers (lower level number = higher hierarchy)
-    for i in range(current_idx - 1, -1, -1):
-        if headers[i]['level'] < current_level:
-            context_parts.insert(0, headers[i]['title'])
-            current_level = headers[i]['level']
-    
-    return " > ".join(context_parts) if context_parts else ""
-
-
-def _split_large_section(text: str, preserve_header: str = None) -> List[str]:
-    """
-    Split a large section while preserving semantic coherence.
-    
-    - Keeps header with first chunk
-    - Splits on paragraph boundaries (double newline)
-    - Keeps images with their nearest text context
-    """
-    if len(text) <= 2000:
-        return [text] if text.strip() else []
-    
-    lines = text.split("\n")
-    chunks = []
-    current_chunk = []
-    current_size = 0
-    
-    image_re = re.compile(r'^!\[[^\]]*\]\([^)]+\)\s*$')
-    header_re = re.compile(r'^#{1,6}\s+.+$')
-    
-    for line in lines:
-        line_stripped = line.strip()
-        is_image = bool(image_re.match(line_stripped))
-        is_header = bool(header_re.match(line_stripped))
-        is_empty = not line_stripped
-        
-        # Always add headers and images to current chunk
-        if is_header or is_image:
-            current_chunk.append(line)
-            current_size += len(line)
-            continue
-        
-        # Check if adding this line would exceed limit
-        if current_size + len(line) > 1800 and current_chunk:
-            # Save current chunk
-            chunk_text = "\n".join(current_chunk).strip()
-            if chunk_text:
-                chunks.append(chunk_text)
-            
-            # Start new chunk - add context from header if available
-            if preserve_header and not chunks:
-                # First chunk already has header
-                current_chunk = [line]
-            else:
-                current_chunk = [line]
-            current_size = len(line)
-        else:
-            current_chunk.append(line)
-            current_size += len(line)
-    
-    # Don't forget last chunk
-    if current_chunk:
-        chunk_text = "\n".join(current_chunk).strip()
-        if chunk_text:
-            chunks.append(chunk_text)
     
     return chunks
 
@@ -698,18 +652,15 @@ def _merge_small_propositions(propositions: List[str], min_chars: int = 100) -> 
         if not prop.strip():
             continue
         
-        # Calculate text length without images/headers
         text_only = re.sub(r'!\[[^\]]*\]\([^)]+\)', '', prop)
         text_only = re.sub(r'^#{1,6}\s+.+$', '', text_only, flags=re.MULTILINE).strip()
         
         has_image = bool(image_re.search(prop))
         has_header = bool(header_re.search(prop))
         
-        # Don't merge if has image or header - these are important context markers
         if has_image or has_header:
             merged.append(prop)
         elif len(text_only) < min_chars and merged:
-            # Merge with previous proposition
             merged[-1] = merged[-1] + "\n\n" + prop
         else:
             merged.append(prop)
@@ -717,117 +668,9 @@ def _merge_small_propositions(propositions: List[str], min_chars: int = 100) -> 
     return merged
 
 
-def _split_by_paragraphs_and_images(text: str, keep_header_with_content: bool = False) -> List[str]:
-    """Split text by paragraphs, keeping images with nearby context.
-    
-    Args:
-        text: Text to split
-        keep_header_with_content: If True, keeps headers attached to their following content
-    """
-    if not text:
-        return []
-    
-    lines = text.split("\n")
-    propositions = []
-    current = []
-    
-    image_re = re.compile(r'^!\[[^\]]*\]\([^)]+\)\s*$')
-    header_re = re.compile(r'^#{1,6}\s+.+$')
-    
-    for i, line in enumerate(lines):
-        is_image = bool(image_re.match(line.strip()))
-        is_empty = not line.strip()
-        is_header = bool(header_re.match(line.strip()))
-        
-        if is_image:
-            # Image line - keep with accumulated content
-            current.append(line)
-        elif is_header and keep_header_with_content:
-            # Header - keep with following content, don't split here
-            current.append(line)
-        elif is_empty and current:
-            # Empty line after content - might be a paragraph break
-            text_content = "\n".join(current).strip()
-            
-            # Check if next non-empty line is a header
-            next_is_header = False
-            for j in range(i + 1, len(lines)):
-                if lines[j].strip():
-                    next_is_header = bool(header_re.match(lines[j].strip()))
-                    break
-            
-            # Split if: substantial content AND (not keeping headers OR next is not header)
-            if len(text_content) > 50 and (not keep_header_with_content or not next_is_header):
-                propositions.append(text_content)
-                current = []
-            # Otherwise keep accumulating
-        else:
-            current.append(line)
-    
-    # Don't forget remaining content
-    if current:
-        text_content = "\n".join(current).strip()
-        if text_content:
-            propositions.append(text_content)
-    
-    # LINE MERGING: Merge broken lines and short propositions
-    merged = []
-    for prop in propositions:
-        # Skip if just whitespace
-        if not prop.strip():
-            continue
-        
-        # Fix line breaks within sentences (satır sonu kesilmelerini düzelt)
-        # Merge lines that don't end with punctuation
-        lines_in_prop = prop.split('\n')
-        fixed_lines = []
-        temp_line = ""
-        
-        for line in lines_in_prop:
-            line = line.strip()
-            if not line:
-                if temp_line:
-                    fixed_lines.append(temp_line)
-                    temp_line = ""
-                fixed_lines.append("")  # Keep paragraph breaks
-                continue
-            
-            # Check if line ends with sentence-ending punctuation or is a header/image
-            ends_sentence = line.endswith(('.', '!', '?', ':', ')', ']', '}', '"', "'"))
-            is_header = bool(header_re.match(line))
-            is_image = bool(image_re.match(line))
-            
-            if temp_line:
-                if ends_sentence or is_header or is_image:
-                    fixed_lines.append(temp_line + " " + line)
-                    temp_line = ""
-                else:
-                    temp_line += " " + line
-            else:
-                if ends_sentence or is_header or is_image:
-                    fixed_lines.append(line)
-                else:
-                    temp_line = line
-        
-        if temp_line:
-            fixed_lines.append(temp_line)
-        
-        prop = "\n".join(fixed_lines).strip()
-        
-        # If prop is very short and no image/header, merge with previous
-        has_image = bool(re.search(r'!\[[^\]]*\]\([^)]+\)', prop))
-        has_header = bool(header_re.search(prop))
-        text_only = re.sub(r'!\[[^\]]*\]\([^)]+\)', '', prop)
-        text_only = re.sub(r'^#{1,6}\s+.+$', '', text_only, flags=re.MULTILINE).strip()
-        
-        if len(text_only) < 100 and not has_image and not has_header and merged:
-            # Merge with previous proposition
-            merged[-1] = merged[-1] + "\n\n" + prop
-        else:
-            merged.append(prop)
-    
-    return merged
-
+# ==========================================
+# MAIN ENTRY POINT
+# ==========================================
 
 def agentic_chunk_text(text: str, source_name: str) -> List[Document]:
     """
@@ -842,11 +685,11 @@ def agentic_chunk_text(text: str, source_name: str) -> List[Document]:
     """
     logger.info(f"[AgenticChunker] Starting chunking for: {source_name}")
     
-    # Extract propositions from text
-    propositions = extract_propositions_from_markdown(text)
-    logger.info(f"[AgenticChunker] Extracted {len(propositions)} propositions")
+    # Extract propositions from text (now returns dicts with metadata)
+    propositions_data = extract_propositions_from_markdown(text)
+    logger.info(f"[AgenticChunker] Extracted {len(propositions_data)} propositions")
     
-    if not propositions:
+    if not propositions_data:
         # Fallback: return single document
         return [Document(
             page_content=text,
@@ -855,7 +698,14 @@ def agentic_chunk_text(text: str, source_name: str) -> List[Document]:
     
     # Use agentic chunker to group propositions
     chunker = AgenticChunker(source_name=source_name)
-    chunker.add_propositions(propositions)
+    
+    for prop_item in propositions_data:
+        # Pass metadata to add_proposition
+        chunker.add_proposition(
+            prop_item['text'],
+            section_h1=prop_item['section_h1'],
+            section_h2=prop_item['section_h2']
+        )
     
     documents = chunker.get_documents()
     logger.info(f"[AgenticChunker] Created {len(documents)} semantic chunks")
