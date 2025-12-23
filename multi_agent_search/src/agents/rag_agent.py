@@ -41,6 +41,19 @@ from ..config import settings
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# ✅ PYDANTIC AI: Type-safe models
+try:
+    from ..models.rag_models import (
+        ChunkMetadata,
+        SearchParams,
+        RetrievedChunk,
+        RetrievalResult,
+    )
+    PYDANTIC_MODELS_AVAILABLE = True
+except ImportError:
+    PYDANTIC_MODELS_AVAILABLE = False
+    logger.warning("[RAG] Pydantic models not available, using dict-based metadata")
+
 
 # ============ LANGSMITH ============
 def setup_langsmith():

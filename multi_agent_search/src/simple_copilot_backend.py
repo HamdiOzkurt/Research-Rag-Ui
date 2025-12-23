@@ -924,6 +924,7 @@ async def debug_chunks_html():
                             <div class="chunk-header">
                                 <span class="chunk-id">Chunk #{chunk['id']}</span>
                                 <span class="chunk-length">{chunk['length']} chars</span>
+                                
                             </div>
                             {metadata_html}
                             <div class="chunk-content">{content}</div>

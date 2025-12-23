@@ -13,6 +13,8 @@ chromadb>=0.4.0
 mcp
 python-dotenv
 pydantic
+pydantic-ai  # Type-safe AI agent framework
+pydantic-ai-slim[openai,groq]  # Providers for Pydantic AI
 httpx
 watchdog
 supabase

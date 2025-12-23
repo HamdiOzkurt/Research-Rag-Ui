@@ -24,6 +24,22 @@ from ..config import settings
 
 logger = logging.getLogger(__name__)
 
+# ✅ PYDANTIC AI: Type-safe LLM interactions
+try:
+    from ..models.rag_models import ChunkDecision
+    from pydantic_ai import Agent
+    from pydantic_ai.providers.ollama import OllamaProvider  # ✅ Yeni API
+    from pydantic import ValidationError
+    import asyncio
+    import concurrent.futures
+    import httpx
+    PYDANTIC_AI_AVAILABLE = True
+    logger.info("[AgenticChunker] Pydantic AI loaded successfully")
+except ImportError as e:
+    PYDANTIC_AI_AVAILABLE = False
+    logger.warning(f"[AgenticChunker] Pydantic AI not available: {e}")
+
+
 
 def _get_chunker_llm():
     """Get LLM for agentic chunking - uses local Ollama (qwen2.5:3b)"""
@@ -370,24 +386,98 @@ New content to place:
 Which chunk ID should this go to? (respond with ID only, or NEW_CHUNK)""")
         ])
         
+        # ✅ PYDANTIC AI: Try structured output first
+        if PYDANTIC_AI_AVAILABLE:
+            try:
+                # ✅ Async function wrapper with timeout
+                async def run_pydantic_agent():
+                    # ✅ Yeni Pydantic AI API: Provider + model string
+                    provider = OllamaProvider(base_url=settings.ollama_base_url)
+                    
+                    agent = Agent(
+                        model="ollama:qwen2.5:3b",  # ✅ Model string formatı
+                        result_type=ChunkDecision,
+                        system_prompt="""You are a document chunking expert.
+Decide if content belongs to existing chunk or needs new one.
+
+RULES:
+1. Group semantically related content
+2. Different topics = NEW_CHUNK
+3. H4/H5 headers = NEW_CHUNK
+4. Max 1800 chars per chunk
+
+Respond with action, chunk_id (if existing), confidence, reasoning.""",
+                        retries=3,  # ✅ Increased from 1 to 3
+                    )
+                    
+                    # ✅ Add timeout (15 seconds)
+                    return await asyncio.wait_for(
+                        agent.run(
+                            f"""Chunks:\n{current_outline}\n\nNew content:\n{proposition[:500]}\n\nWhich chunk?"""
+                        ),
+                        timeout=15.0
+                    )
+                
+                # ✅ Safe async execution - handle nested event loop
+                try:
+                    asyncio.get_running_loop()  # Check if in async context
+                    # Already in async context - use thread pool
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(asyncio.run, run_pydantic_agent())
+                        result = future.result(timeout=18.0)
+                except RuntimeError:
+                    # Sync context - safe to use asyncio.run
+                    result = asyncio.run(run_pydantic_agent())
+                
+                decision: ChunkDecision = result.data
+                
+                if self.print_logging:
+                    logger.info(
+                        f"[PydanticAI] {decision.action} "
+                        f"(conf: {decision.confidence:.2f}) - {decision.reasoning[:50] if decision.reasoning else 'N/A'}"
+                    )
+                
+                if decision.action == "NEW_CHUNK":
+                    return None
+                
+                if decision.chunk_id and decision.chunk_id in available_chunks:
+                    return decision.chunk_id
+                
+                # Invalid chunk_id, create new
+                return None
+            
+            except asyncio.TimeoutError:
+                if self.print_logging:
+                    logger.warning("[PydanticAI] Timeout (15s), using fallback")
+            except (httpx.ConnectError, httpx.TimeoutException) as conn_err:
+                if self.print_logging:
+                    logger.warning(f"[PydanticAI] Connection error: {conn_err}, using fallback")
+            except ValidationError as val_err:
+                if self.print_logging:
+                    logger.warning(f"[PydanticAI] Validation error: {val_err}, using fallback")
+            except concurrent.futures.TimeoutError:
+                if self.print_logging:
+                    logger.warning("[PydanticAI] Thread timeout, using fallback")
+            except Exception as pydantic_err:
+                if self.print_logging:
+                    logger.warning(f"[PydanticAI] Error: {type(pydantic_err).__name__}: {pydantic_err}")
+        
+        # ⚠️ FALLBACK: Original string parsing (if Pydantic AI unavailable or fails)
         try:
             result = (PROMPT | self.llm).invoke({
                 "current_outline": current_outline,
-                "proposition": proposition[:500]  # Truncate for efficiency
+                "proposition": proposition[:500]
             })
             
             response = result.content.strip()
             
-            # Check if response is a valid chunk ID
             if response == "NEW_CHUNK" or response.lower() == "new_chunk":
                 return None
             
-            # ✅ FIX: Only match against available_chunks (not oversized ones)
             for chunk_id in available_chunks.keys():
                 if chunk_id in response:
                     return chunk_id
             
-            # If response length matches ID format, try it (only in available)
             if len(response) == self.id_truncate_limit and response in available_chunks:
                 return response
             
