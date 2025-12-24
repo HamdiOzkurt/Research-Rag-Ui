@@ -389,46 +389,47 @@ Which chunk ID should this go to? (respond with ID only, or NEW_CHUNK)""")
         # ✅ PYDANTIC AI: Try structured output first
         if PYDANTIC_AI_AVAILABLE:
             try:
-                # ✅ Async function wrapper with timeout
+                # 1. Define the async function
                 async def run_pydantic_agent():
-                    # ✅ Yeni Pydantic AI API: Provider + model string
                     provider = OllamaProvider(base_url=settings.ollama_base_url)
-                    
                     agent = Agent(
-                        model="ollama:qwen2.5:3b",  # ✅ Model string formatı
+                        model="ollama:qwen2.5:3b",
                         result_type=ChunkDecision,
                         system_prompt="""You are a document chunking expert.
 Decide if content belongs to existing chunk or needs new one.
-
 RULES:
 1. Group semantically related content
 2. Different topics = NEW_CHUNK
 3. H4/H5 headers = NEW_CHUNK
 4. Max 1800 chars per chunk
-
 Respond with action, chunk_id (if existing), confidence, reasoning.""",
-                        retries=3,  # ✅ Increased from 1 to 3
+                        retries=2,
                     )
-                    
-                    # ✅ Add timeout (15 seconds)
-                    return await asyncio.wait_for(
-                        agent.run(
-                            f"""Chunks:\n{current_outline}\n\nNew content:\n{proposition[:500]}\n\nWhich chunk?"""
-                        ),
-                        timeout=15.0
+                    return await agent.run(
+                        f"""Chunks:\n{current_outline}\n\nNew content:\n{proposition[:500]}\n\nWhich chunk?"""
                     )
-                
-                # ✅ Safe async execution - handle nested event loop
+
+                # 2. Robust Execution Logic (Fixes RuntimeWarning)
+                def _run_in_thread():
+                    """Helper to run async code in a clean thread with asyncio.run"""
+                    return asyncio.run(run_pydantic_agent())
+
                 try:
-                    asyncio.get_running_loop()  # Check if in async context
-                    # Already in async context - use thread pool
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(asyncio.run, run_pydantic_agent())
-                        result = future.result(timeout=18.0)
+                    # Check if we are already in an async loop
+                    current_loop = asyncio.get_running_loop()
                 except RuntimeError:
-                    # Sync context - safe to use asyncio.run
+                    current_loop = None
+
+                if current_loop and current_loop.is_running():
+                    # ASYNC CONTEXT: Run in thread pool to avoid blocking/nesting errors
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                        future = executor.submit(_run_in_thread)
+                        result = future.result(timeout=20.0)
+                else:
+                    # SYNC CONTEXT: Run directly
                     result = asyncio.run(run_pydantic_agent())
                 
+                # 3. Process Result
                 decision: ChunkDecision = result.data
                 
                 if self.print_logging:
@@ -443,24 +444,12 @@ Respond with action, chunk_id (if existing), confidence, reasoning.""",
                 if decision.chunk_id and decision.chunk_id in available_chunks:
                     return decision.chunk_id
                 
-                # Invalid chunk_id, create new
                 return None
             
-            except asyncio.TimeoutError:
+            except Exception as e:
+                # Silent fail to fallback
                 if self.print_logging:
-                    logger.warning("[PydanticAI] Timeout (15s), using fallback")
-            except (httpx.ConnectError, httpx.TimeoutException) as conn_err:
-                if self.print_logging:
-                    logger.warning(f"[PydanticAI] Connection error: {conn_err}, using fallback")
-            except ValidationError as val_err:
-                if self.print_logging:
-                    logger.warning(f"[PydanticAI] Validation error: {val_err}, using fallback")
-            except concurrent.futures.TimeoutError:
-                if self.print_logging:
-                    logger.warning("[PydanticAI] Thread timeout, using fallback")
-            except Exception as pydantic_err:
-                if self.print_logging:
-                    logger.warning(f"[PydanticAI] Error: {type(pydantic_err).__name__}: {pydantic_err}")
+                    logger.debug(f"[PydanticAI] Fallback triggered: {e}")
         
         # ⚠️ FALLBACK: Original string parsing (if Pydantic AI unavailable or fails)
         try:

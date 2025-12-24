@@ -1324,19 +1324,32 @@ def retrieve_context(query: str, top_k: str = "3"):
                             "messages": [
                                 {
                                     "role": "user",
-                                    "content": """Sen uzman bir Veri Analisti ve Görsel Dokümantasyon Asistanısın.
-Görevin, görme engelli bir profesyonel için bu görseli en ince teknik detayına kadar METNE DÖKMEKTİR.
+                                    "content": f"""Sen uzman bir Veri Analisti ve Görsel Dokümantasyon Asistanısın.
 
-Lütfen analizi şu 4 başlık altında yapılandırarak SADECE TÜRKÇE ver:
+KULLANICI SORUSU: "{query}"
 
-1. **Görsel Türü**: (Örn: Çizgi Grafik, Sütun Grafik, Veri Tablosu, Akış Şeması, Arayüz Ekran Görüntüsü vb.)
+Görevin:
+1. Bu görselin KULLANICI SORUSU ile alakalı olup olmadığını belirle
+2. Alakalıysa detaylı analiz yap, alakasızsa "İLGİSİZ" de
+
+ÖNEMLİ:
+- Eğer görsel KULLANICI SORUSUNDA GEÇMEYENbir konuyu anlatıyorsa → "İLGİSİZ"
+- Eğer görsel KULLANICI SORUSUYLA DOĞRUDAN İLGİLİyse → Detaylı analiz yap
+
+Analiz formatı (SADECE TÜRKÇE):
+
+**UYGUNLUK**: [UYGUN veya İLGİSİZ]
+
+Eğer UYGUN ise:
+
+1. **Görsel Türü**: (Örn: Çizgi Grafik, Sütun Grafik, Veri Tablosu, Akış Şeması, Algoritma Diyagramı vb.)
 2. **Genel Konu**: Görsel ne hakkında? Başlıklar ne diyor?
 3. **Veri ve İçerik (KRİTİK)**: 
    - Eğer bu bir GRAFİK ise: X ve Y eksenleri nedir? Trend artıyor mu azalıyor mu? En yüksek ve en düşük değerler ne?
    - Eğer bu bir TABLO ise: Satır ve sütun başlıklarını oku. Önemli sayısal verileri listele.
-   - Eğer bu bir ŞEMA ise: Adımları sırasıyla yaz (A -> B -> C).
+   - Eğer bu bir ŞEMA/DİYAGRAM ise: Adımları veya bileşenleri sırasıyla yaz (A -> B -> C).
    - Eğer metin içeren bir görüntü ise: Okunabilen tüm metinleri transkribe et.
-4. **Çıkarım**: Bu görselin dökümandaki ana fikri destekleyen en önemli mesajı nedir?
+4. **Çıkarım**: Bu görselin kullanıcı sorusuna cevap vermek için en önemli katkısı nedir?
 
 Yorum yapma, sadece görselde somut olarak var olan veriyi aktar.""",
                                     "images": [img_base64]
@@ -1350,6 +1363,13 @@ Yorum yapma, sadece görselde somut olarak var olan veriyi aktar.""",
 
                     if response.status_code == 200:
                         analysis = response.json().get("message", {}).get("content", "")
+                        
+                        # ✅ RELEVANCE CHECK: İlgisiz görsel filtreleme
+                        if "İLGİSİZ" in analysis.upper() or "UYGUNLUK**: İLGİSİZ" in analysis:
+                            logger.warning(f"[VISION GATE] ❌ {vision_model} marked image as IRRELEVANT to query")
+                            logger.warning(f"[VISION GATE] Skipping this image: {img_data['safe_path'].name}")
+                            # Bu görseli atla, sonrakine geç
+                            break
                         
                         # Kaliteyi Puanla
                         quality = calculate_quality_score(analysis)
