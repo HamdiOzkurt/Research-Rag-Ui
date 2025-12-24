@@ -2,7 +2,7 @@
 Smart Backend with Caching & Rate Limiting
 Showcase Mode: No Auth, No Billing
 """
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request  # ✅ Request eklendi
 from fastapi import Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, HTMLResponse, FileResponse
@@ -20,7 +20,7 @@ import os
 from pathlib import Path
 
 from .agents.simple_agent import run_simple_research
-from .agents.rag_agent import graph as rag_graph  # RAG Agent (LangChain)
+from .agents.rag_agent import graph as rag_graph, _rag_state  # ✅ HITL state
 from .agents.main_agent import run_research as run_deep_research
 from .config import settings
 from .memory.supabase_memory import get_memory
@@ -122,7 +122,17 @@ app.add_middleware(
 )
 
 # Mount uploads directory for serving images and files
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+# FIX: Detect correct uploads directory based on CWD
+upload_fs_path = Path("multi_agent_search/uploads")
+if not upload_fs_path.exists():
+    upload_fs_path = Path("uploads")
+
+if not upload_fs_path.exists():
+    # Create if missing
+    upload_fs_path.mkdir(parents=True, exist_ok=True)
+
+app.mount("/uploads", StaticFiles(directory=str(upload_fs_path)), name="uploads")
+print(f"[SERVER] ✅ Serving /uploads from: {upload_fs_path.resolve()}")
 
 # Showcase Mode: Single Demo User
 DEMO_USER_ID = "demo-user-showcase"
@@ -1105,6 +1115,216 @@ inngest.fast_api.serve(
 )
 logger.info("[INNGEST] ✅ Endpoint registered at /api/inngest")
 logger.info("[INNGEST] Start dev server: npx inngest-cli@latest dev -u http://127.0.0.1:8000/api/inngest")
+
+
+# ==================== HITL RAG STATE ENDPOINTS ====================
+
+@app.get("/api/rag/state")
+async def get_rag_state():
+    """
+    Get current RAG state for frontend HITL workflow.
+    
+    Returns RAGState with:
+    - retrieved_chunks: Chunks waiting for approval
+    - approved_chunk_ids: User-approved chunk IDs
+    - awaiting_approval: True if waiting for user
+    - is_synthesizing: True if generating answer
+    - current_query: User's query
+    """
+    try:
+        state_dict = _rag_state.model_dump()
+        logger.info(f"[HITL API] State requested - awaiting_approval={_rag_state.awaiting_approval}, chunks={len(_rag_state.retrieved_chunks)}")
+        return state_dict
+    except Exception as e:
+        logger.error(f"[HITL API] Error getting state: {e}")
+        return {"error": str(e)}
+
+
+@app.post("/api/rag/approve")
+async def approve_chunks(request: Request):
+    """
+    User approved chunks - trigger synthesis.
+    
+    Body: { "approved_chunk_ids": ["chunk1", "chunk2", ...] }
+    """
+    try:
+        data = await request.json()
+        approved_ids = data.get("approved_chunk_ids", [])
+        
+        if not approved_ids:
+            return {"error": "No chunks selected", "status": "error"}
+        
+        logger.info(f"[HITL API] User approved {len(approved_ids)} chunks")
+        
+        # Update state
+        _rag_state.approved_chunk_ids = approved_ids
+        _rag_state.awaiting_approval = False
+        _rag_state.is_synthesizing = True
+        
+        # Call synthesize_answer tool
+        from .agents.rag_agent import synthesize_answer
+        
+        answer = await synthesize_answer(approved_ids)
+        
+        return {
+            "status": "success",
+            "count": len(approved_ids),
+            "message": "Chunks approved and answer generated",
+            "answer": answer
+        }
+        
+    except Exception as e:
+        logger.error(f"[HITL API] Error approving chunks: {e}")
+        return {"error": str(e), "status": "error"}
+
+
+@app.post("/api/rag/reset")
+async def reset_rag_state():
+    """Reset RAG state to initial condition"""
+    try:
+        global _rag_state
+        from .models.rag_models import RAGState
+        _rag_state = RAGState()  # Fresh state
+        
+        logger.info("[HITL API] State reset")
+        return {"status": "success", "message": "RAG state reset"}
+    except Exception as e:
+        logger.error(f"[HITL API] Error resetting state: {e}")
+        return {"error": str(e), "status": "error"}
+
+
+@app.get("/api/rag/chunks")
+async def get_all_chunks(query: Optional[str] = None):
+    """
+    Get ALL chunks from vector store with full metadata.
+    If query is provided, calculates relevance scores and sorts by relevance.
+    Used for Chunk Explorer UI.
+    """
+    try:
+        from .agents.rag_agent import _vector_store
+        
+        # 1. Get ALL raw data first to populate the list
+        all_data = _vector_store.get()
+        
+        if not all_data or 'documents' not in all_data:
+            return []
+            
+        # 2. If query is provided, perform semantic search to get scores
+        score_map = {}
+        if query and query.strip():
+            try:
+                # Search for relevance scores (k=len(ids) to score potentially all)
+                # Note: similarity_search_with_relevance_scores converts distance to 0-1 score
+                search_results = _vector_store.similarity_search_with_relevance_scores(
+                    query, 
+                    k=len(all_data['ids']) 
+                )
+                
+                # Map chunk_id (or index) to score
+                for doc, score in search_results:
+                    # Try to use chunk_id from metadata, fallback to matching content/source
+                    c_id = doc.metadata.get("chunk_id")
+                    if c_id:
+                        score_map[c_id] = score
+                        
+            except Exception as e:
+                logger.warning(f"[CHUNKS API] Semantic search failed: {e}")
+
+        chunks = []
+        for i, (content, metadata, doc_id) in enumerate(zip(all_data['documents'], all_data['metadatas'], all_data['ids'])):
+            
+            # Metadata chunk_id vs Chroma ID sync
+            c_id = metadata.get("chunk_id", doc_id)
+            
+            # Extract images - 1. Method: Markdown
+            import re
+            from pathlib import Path
+            image_paths = re.findall(r'!\[.*?\]\((.*?)\)', content)
+            
+            # 2. Method: Filesystem fallback
+            if not image_paths and metadata.get("has_images", False):
+                source_file = metadata.get("source", "")
+                if source_file:
+                    base_name = Path(source_file).stem
+                    # Check uploads directories
+                    upload_dir = Path("uploads")
+                    found_images = []
+                    
+                    # A. Subdirectory check: uploads/DocName_images/
+                    specific_dir = upload_dir / f"{base_name}_images"
+                    if specific_dir.exists():
+                        found_images.extend(specific_dir.glob("*.png"))
+                        found_images.extend(specific_dir.glob("*.jpg"))
+                        found_images.extend(specific_dir.glob("*.jpeg"))
+                    
+                    # B. Root uploads check
+                    if not found_images:
+                        found_images.extend(upload_dir.glob(f"{base_name}-*.png"))
+                        found_images.extend(upload_dir.glob(f"{base_name}-*.jpg"))
+                    
+                    # Convert to web-accessible paths (relative to root, e.g. "uploads/folder/img.png")
+                    image_paths = [str(img).replace("\\", "/") for img in found_images]
+            
+            # Determine Relevance Score
+            # If query exists: use score from vector search (default 0.0 if not in top results)
+            # If no query: default to 0.0
+            relevance = 0.0
+            if query and query.strip():
+                relevance = score_map.get(c_id, 0.0) 
+            
+            # ✅ Rich metadata
+            chunk_data = {
+                "chunk_id": c_id,
+                "title": metadata.get("title", "Başlıksız"),
+                "summary": metadata.get("summary", content[:200] + "..."),
+                "content": content,
+                "source": metadata.get("source", "unknown"),
+                "metadata": {
+                    "chunk_index": metadata.get("chunk_index", i),
+                    "section_h1": metadata.get("section_h1"),
+                    "section_h2": metadata.get("section_h2"),
+                    "section_h3": metadata.get("section_h3"),
+                    "has_images": metadata.get("has_images", False),
+                    "cross_references": metadata.get("cross_references"),
+                    "table_count": metadata.get("table_count", 0),
+                    "page": metadata.get("page"),
+                    "paragraph_index": metadata.get("paragraph_index"),
+                    "created_at": metadata.get("created_at"),
+                    "updated_at": metadata.get("updated_at"),
+                    "chunk_type": metadata.get("chunk_type"),
+                    "importance_score": metadata.get("importance_score"),
+                    "raw": metadata
+                },
+                "images": image_paths,
+                "relevance": relevance,
+                "tags": metadata.get("tags", [])
+            }
+            chunks.append(chunk_data)
+            
+        # 4. Sort by relevance if query exists, else by index
+        if query and query.strip():
+            chunks.sort(key=lambda x: x['relevance'], reverse=True)
+        else:
+            chunks.sort(key=lambda x: (x['source'], x['metadata'].get('chunk_index', 0)))
+            
+        return {
+            "chunks": chunks,
+            "total": len(chunks),
+            "query": query
+        }
+
+    except Exception as e:
+        logger.error(f"[CHUNKS API] Error: {e}", exc_info=True)
+        return {"chunks": [], "error": str(e)}
+        
+
+
+
+logger.info("[HITL] ✅ RAG State endpoints registered:")
+logger.info("  - GET  /api/rag/state (Get current state)")
+logger.info("  - POST /api/rag/approve (Approve chunks)")
+logger.info("  - POST /api/rag/reset (Reset state)")
+
 
 if __name__ == "__main__":
     import uvicorn

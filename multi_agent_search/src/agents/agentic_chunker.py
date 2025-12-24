@@ -600,147 +600,115 @@ Respond with action, chunk_id (if existing), confidence, reasoning.""",
 
 def extract_propositions_from_markdown(markdown_text: str) -> List[Dict[str, Any]]:
     """
-    Extract propositions with section tracking (Hierarchical Metadata).
-    
-    Returns list of dicts: {'text': str, 'section_h1': str, 'section_h2': str}
+    Extract propositions with robust section tracking (Direct Metadata Tracking).
     """
     if not markdown_text:
         return []
     
     text = markdown_text.replace("\r\n", "\n").replace("\r", "\n")
     
-    # Track current section headers
-    h1_pattern = re.compile(r'^#\s+(.+)$', re.MULTILINE)
-    h2_pattern = re.compile(r'^##\s+(.+)$', re.MULTILINE)
-    
-    # Extract all header positions
-    h1_headers = {m.start(): m.group(1).strip() for m in h1_pattern.finditer(text)}
-    h2_headers = {m.start(): m.group(1).strip() for m in h2_pattern.finditer(text)}
-    
-    # ✅ FIX: Use proper extraction (not simple paragraph split)
-    raw_props = _extract_propositions_with_headers(text)
-    
-    propositions_with_metadata = []
-    
-    current_pos = 0
-    for prop in raw_props:
-        clean_prop = prop.strip()
-        if not clean_prop:
-            continue
-            
-        found_pos = text.find(clean_prop[:50], current_pos)
-        if found_pos == -1:
-            found_pos = current_pos
-        else:
-            current_pos = found_pos
-        
-        # Find nearest H1 before this position
-        section_h1 = None
-        best_h1_pos = -1
-        for pos, title in h1_headers.items():
-            if pos < found_pos and pos > best_h1_pos:
-                section_h1 = title
-                best_h1_pos = pos
-        
-        # Find nearest H2 before this position
-        section_h2 = None
-        best_h2_pos = -1
-        for pos, title in h2_headers.items():
-            if pos < found_pos and pos > best_h2_pos:
-                section_h2 = title
-                best_h2_pos = pos
-        
-        # H2 is only valid if it's after the current H1 (hierarchical)
-        if best_h2_pos < best_h1_pos:
-            section_h2 = None
-            
-        propositions_with_metadata.append({
-            'text': prop,
-            'section_h1': section_h1,
-            'section_h2': section_h2
-        })
-        
-        current_pos += len(clean_prop)
-    
-    return propositions_with_metadata
+    # Tüm işi artık bu fonksiyon metadata ile birlikte yapıyor
+    return _extract_propositions_with_headers(text)
 
 
-# ==========================================
-# ✅ NEW HELPER FUNCTIONS - PROPER LOGIC
-# ==========================================
-
-def _extract_propositions_with_headers(text: str) -> List[str]:
+def _extract_propositions_with_headers(text: str) -> List[Dict[str, Any]]:
     """
-    Extract propositions using major header splitting + image attachment.
-    
-    This is the PROPER extraction logic (was unreachable before).
+    Extract propositions using major header splitting + Metadata Tracking.
+    Returns list of {'text': str, 'section_h1': str, 'section_h2': str}
     """
     # Find major headers (H1-H3)
-    major_header_pattern = re.compile(r'^(#{1,3})\s+.+', re.MULTILINE)
+    major_header_pattern = re.compile(r'^(#{1,3})\s+(.+)$', re.MULTILINE)
     major_headers = []
     
+    # Headerları bul ve text'ini de kaydet
     for match in major_header_pattern.finditer(text):
         level = len(match.group(1))
+        title = match.group(2).strip()
         major_headers.append({
             'level': level,
+            'title': title, # Başlık metni
             'start': match.start(),
-            'end': match.end(),
+            'end': match.end(), # Header'ın bittiği yer (içeriğin başladığı yer aslında burası değil, bir sonraki satır)
         })
     
     if not major_headers:
-        # No major headers - use smart split with image attachment
-        return _smart_split_with_images(text)
+        # Header yoksa, tek parça döndür (Images logic dahil)
+        props = _smart_split_with_images(text)
+        return [{'text': p, 'section_h1': None, 'section_h2': None} for p in props]
     
-    propositions = []
+    propositions_with_meta = []
+    
+    # State tracking
+    curr_h1 = None
+    curr_h2 = None
     
     # Handle content before first header
     if major_headers[0]['start'] > 0:
         pre_content = text[:major_headers[0]['start']].strip()
         if pre_content:
-            propositions.append(pre_content)
-    
+            propositions_with_meta.append({
+                'text': pre_content,
+                'section_h1': None,
+                'section_h2': None
+            })
+            
     # Process each major section
     for i, header in enumerate(major_headers):
-        section_start = header['start']
+        # Update State based on current header
+        if header['level'] == 1:
+            curr_h1 = header['title']
+            curr_h2 = None
+        elif header['level'] == 2:
+            curr_h2 = header['title']
+            # H2 gelirse H1 değişmez, ama eğer dosya H2 ile başlıyorsa ve H1 yoksa? (Fallback: H1=None)
+            
+        section_start = header['end'] # Header satırından sonrası
         section_end = major_headers[i + 1]['start'] if i + 1 < len(major_headers) else len(text)
         
         section_text = text[section_start:section_end].strip()
         
         if not section_text:
             continue
-        
-        # Attach images to their H5/H6 headers
+            
+        # Attach images logic
         processed_section = _attach_images_to_headers(section_text)
         
-        # Split at H4 headers (algorithms, methods)
+        # Split at H4 headers logic (preserve metadata)
+        sub_props = []
         h4_pattern = re.compile(r'^####\s+.+', re.MULTILINE)
         h4_matches = list(h4_pattern.finditer(processed_section))
         
         if not h4_matches:
-            # No H4 headers - process as single section
             if len(processed_section) > 1500:
-                sub_props = _split_large_section_preserve_images(processed_section)
-                propositions.extend(sub_props)
+                splits = _split_large_section_preserve_images(processed_section)
+                sub_props.extend(splits)
             else:
-                propositions.append(processed_section)
+                sub_props.append(processed_section)
         else:
-            # Has H4 headers - split by them
             for idx, match in enumerate(h4_matches):
                 h4_start = match.start()
                 h4_end = h4_matches[idx + 1].start() if idx + 1 < len(h4_matches) else len(processed_section)
-                
                 h4_section = processed_section[h4_start:h4_end].strip()
                 
                 if len(h4_section) > 1500:
-                    sub_props = _split_large_section_preserve_images(h4_section)
-                    propositions.extend(sub_props)
+                    splits = _split_large_section_preserve_images(h4_section)
+                    sub_props.extend(splits)
                 else:
-                    propositions.append(h4_section)
-    
-    # Merge very small props
-    merged = _merge_small_propositions(propositions, min_chars=150)
-    
-    return [p for p in merged if p.strip()]
+                    sub_props.append(h4_section)
+        
+        # Merge very small props
+        merged_props = _merge_small_propositions(sub_props, min_chars=150)
+        
+        # Add to result with CURRENT metadata
+        for p in merged_props:
+            if p.strip():
+                propositions_with_meta.append({
+                    'text': p,
+                    'section_h1': curr_h1,
+                    'section_h2': curr_h2
+                })
+                
+    return propositions_with_meta
 
 
 def _attach_images_to_headers(section_text: str) -> str:

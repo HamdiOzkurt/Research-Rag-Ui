@@ -26,6 +26,7 @@ stripe
 inngest
 
 # RAG Dependencies
+sentence-transformers>=2.2.0
 pypdf
 python-docx>=1.1.0
 docx2txt

@@ -55,7 +55,7 @@ export default function AppShell({
   }, [backendStatus]);
 
   return (
-    <div className="h-screen w-full bg-muted/30 text-foreground">
+    <div className="h-full w-full bg-muted/30 text-foreground">
       <div className="flex h-full">
         {/* Left sidebar */}
         <aside

@@ -69,8 +69,21 @@ type ThreadMessage = {
   created_at?: string;
 };
 
-export default function CopilotChatInterface() {
-  const [mode, setMode] = useState<AgentMode>("simple");
+// ✅ Updated Props
+interface CopilotChatInterfaceProps {
+  agentMode: AgentMode;
+  onModeChange: (mode: AgentMode) => void;
+  onStatusChange?: (status: AgentStatus | null) => void;
+  onActivityChange?: (activity: any[]) => void;
+}
+
+export default function CopilotChatInterface({
+  agentMode,
+  onModeChange,
+  onStatusChange,
+  onActivityChange
+}: CopilotChatInterfaceProps) {
+  // const [mode, setMode] = useState<AgentMode>("simple");  <-- REMOVED
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -93,6 +106,26 @@ export default function CopilotChatInterface() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // ✅ Listen for HITL tool outputs (RAG Approvals)
+  useEffect(() => {
+    const handleHitlAnswer = (e: CustomEvent) => {
+      console.log("📥 Received HITL Answer event:", e.detail);
+      const { answer } = e.detail;
+      if (answer) {
+        setMessages(prev => [...prev, {
+          id: "hitl-" + Date.now().toString(),
+          role: "assistant",
+          content: answer
+        }]);
+        // Scroll to bottom
+        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+      }
+    };
+
+    document.addEventListener("hitl-answer", handleHitlAnswer as EventListener);
+    return () => document.removeEventListener("hitl-answer", handleHitlAnswer as EventListener);
+  }, []);
+
   const handleResumeThread = async (threadId: string) => {
     setShowThreads(false);
     try {
@@ -108,8 +141,8 @@ export default function CopilotChatInterface() {
 
       setThreadId(threadId);
       setMessages(nextMessages);
-      setAgentStatus(null);
-      setActivity([]);
+      setAgentStatus(null); onStatusChange?.(null);
+      setActivity([]); onActivityChange?.([]);
       setLatestSources([]);
     } catch (err) {
       console.error(err);
@@ -137,8 +170,8 @@ export default function CopilotChatInterface() {
     setMessages(prev => [...prev, userMessage]);
     setInput("");
     setIsLoading(true);
-    setAgentStatus(null);
-    setActivity([]);
+    setAgentStatus(null); onStatusChange?.(null);
+    setActivity([]); onActivityChange?.([]);
     setLatestSources([]);
     runStartRef.current = Date.now();
     currentRunIdRef.current = null;
@@ -147,10 +180,11 @@ export default function CopilotChatInterface() {
       await chatStream({
         message: userMessage.content,
         threadId: threadId,
-        mode: mode,
-        options: mode === "multi" ? options : undefined,
+        mode: agentMode,
+        options: agentMode === "multi" ? options : undefined,
         onStatus: (status: AgentStatus) => {
           setAgentStatus(status);
+          onStatusChange?.(status);
 
           if (status.thread_id) {
             setThreadId(status.thread_id);
@@ -190,7 +224,9 @@ export default function CopilotChatInterface() {
               runId: status.run_id,
             };
             // keep last 12 events max
-            return [...prev, next].slice(-12);
+            const newActivity = [...prev, next].slice(-12);
+            onActivityChange?.(newActivity);
+            return newActivity;
           });
         },
         onDone: (finalContent: string, metadata?: any) => {
@@ -202,7 +238,7 @@ export default function CopilotChatInterface() {
           };
           setMessages(prev => [...prev, assistantMessage]);
           setIsLoading(false);
-          setAgentStatus(null);
+          setAgentStatus(null); onStatusChange?.(null);
         },
         onError: (error: string) => {
           const errorMessage: Message = {
@@ -212,12 +248,12 @@ export default function CopilotChatInterface() {
           };
           setMessages(prev => [...prev, errorMessage]);
           setIsLoading(false);
-          setAgentStatus(null);
+          setAgentStatus(null); onStatusChange?.(null);
         }
       });
     } catch (err) {
       setIsLoading(false);
-      setAgentStatus(null);
+      setAgentStatus(null); onStatusChange?.(null);
     }
   };
 
@@ -238,11 +274,11 @@ export default function CopilotChatInterface() {
           <ThreadsList onResumeThread={handleResumeThread} />
         </div>
       )}
-      
+
       <div className="flex-1 flex flex-col max-w-4xl mx-auto w-full">
         {/* Agent Status Bar */}
-        {agentStatus && <AgentStatusBar status={agentStatus} mode={mode} />}
-        
+        {agentStatus && <AgentStatusBar status={agentStatus} mode={agentMode} />}
+
         {/* Header with Mode Selector */}
         <div className="p-5 border-b bg-background/80 backdrop-blur">
           <div className="flex items-center justify-between mb-4">
@@ -257,7 +293,7 @@ export default function CopilotChatInterface() {
                 </p>
               </div>
             </div>
-            
+
             <div className="flex items-center gap-2">
               <Button
                 variant="outline"
@@ -278,14 +314,13 @@ export default function CopilotChatInterface() {
             {AGENT_MODES.map((m) => (
               <button
                 key={m.value}
-                onClick={() => setMode(m.value)}
+                onClick={() => onModeChange(m.value)}
                 title={m.desc}
                 disabled={isLoading}
-                className={`flex items-center gap-1.5 px-4 py-2 text-sm rounded-md transition-all ${
-                  mode === m.value
-                    ? "bg-background text-foreground shadow-sm font-medium"
-                    : "text-muted-foreground hover:text-foreground"
-                } ${isLoading ? "opacity-50 cursor-not-allowed" : ""}`}
+                className={`flex items-center gap-1.5 px-4 py-2 text-sm rounded-md transition-all ${agentMode === m.value
+                  ? "bg-background text-foreground shadow-sm font-medium"
+                  : "text-muted-foreground hover:text-foreground"
+                  } ${isLoading ? "opacity-50 cursor-not-allowed" : ""}`}
               >
                 {m.icon}
                 <span>{m.label}</span>
@@ -293,7 +328,7 @@ export default function CopilotChatInterface() {
             ))}
           </div>
           {/* Options Panel (Multi-Agent only) */}
-          {mode === "multi" && (
+          {agentMode === "multi" && (
             <div className="mt-3">
               <button
                 onClick={() => setShowOptions(!showOptions)}
@@ -338,9 +373,9 @@ export default function CopilotChatInterface() {
               )}
             </div>
           )}
-          
+
           {/* RAG File Upload - Only in Multi Mode */}
-          {mode === "multi" && <RAGFileUpload />}
+          {agentMode === "multi" && <RAGFileUpload />}
         </div>
 
         {/* Messages Area */}
@@ -419,7 +454,7 @@ export default function CopilotChatInterface() {
                   Ask anything and watch the agents work in real-time.
                 </p>
               </div>
-              
+
               {/* Example prompts */}
               <div className="grid gap-2 max-w-lg w-full">
                 {[
@@ -437,7 +472,7 @@ export default function CopilotChatInterface() {
                   </button>
                 ))}
               </div>
-              
+
               <div className="flex gap-2 mt-6">
                 <Badge variant="secondary" className="text-xs">
                   🔍 Web Research
@@ -458,11 +493,10 @@ export default function CopilotChatInterface() {
                   className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
                 >
                   <div
-                    className={`max-w-[80%] rounded-2xl px-4 py-3 ${
-                      msg.role === "user"
-                        ? "bg-slate-900 text-white"
-                        : "bg-card border"
-                    }`}
+                    className={`max-w-[80%] rounded-2xl px-4 py-3 ${msg.role === "user"
+                      ? "bg-slate-900 text-white"
+                      : "bg-card border"
+                      }`}
                   >
                     {msg.role === "assistant" ? (
                       <>
@@ -471,9 +505,9 @@ export default function CopilotChatInterface() {
                           <div className="mt-4 grid grid-cols-2 gap-2">
                             {msg.images.map((img, idx) => (
                               <div key={idx} className="relative group cursor-pointer" onClick={() => window.open(img.url, '_blank')}>
-                                <img 
-                                  src={img.url} 
-                                  alt={img.alt} 
+                                <img
+                                  src={img.url}
+                                  alt={img.alt}
                                   className="w-full h-auto rounded border border-gray-300 dark:border-gray-700 hover:opacity-90 transition-opacity"
                                 />
                                 <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-10 transition-all rounded flex items-center justify-center">
@@ -493,14 +527,14 @@ export default function CopilotChatInterface() {
                   </div>
                 </div>
               ))}
-              
+
               {isLoading && !agentStatus && (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="w-4 h-4 animate-spin" />
                   <span>Connecting to agents...</span>
                 </div>
               )}
-              
+
               <div ref={messagesEndRef} />
             </div>
           )}

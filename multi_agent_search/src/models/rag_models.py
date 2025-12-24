@@ -121,14 +121,23 @@ class SearchParams(BaseModel):
 
 
 class RetrievedChunk(BaseModel):
-    """Single retrieved chunk with similarity score"""
+    """Single retrieved chunk with similarity score - Enhanced for HITL"""
     
-    chunk_id: str
-    content: str
-    similarity: float = Field(..., ge=0.0, le=1.0)
-    metadata: dict = Field(default_factory=dict)
+    chunk_id: str = Field(..., description="Unique chunk identifier")
+    content: str = Field(..., max_length=2000, description="Chunk content (truncated)")
+    title: str = Field(..., description="Chunk title")
+    summary: str = Field(..., description="Brief summary")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Relevance score")
+    source: str = Field(..., description="Source document name")
     
     # Optional enriched fields
+    has_images: bool = Field(default=False, description="Contains images")
+    section_h1: Optional[str] = Field(None, description="Main section heading")
+    section_h2: Optional[str] = Field(None, description="Sub-section heading")
+    
+    # Legacy compatibility
+    similarity: Optional[float] = Field(None, ge=0.0, le=1.0)  # Alias for confidence
+    metadata: dict = Field(default_factory=dict)
     document_title: Optional[str] = None
     document_source: Optional[str] = None
     chunk_index: Optional[int] = None
@@ -169,3 +178,52 @@ class RAGError(BaseModel):
     message: str
     details: Optional[dict] = None
     timestamp: datetime = Field(default_factory=datetime.now)
+
+
+# ==================== HUMAN-IN-THE-LOOP MODELS ====================
+
+class RAGState(BaseModel):
+    """Human-in-the-Loop state management for RAG workflow"""
+    
+    retrieved_chunks: list[RetrievedChunk] = Field(
+        default_factory=list,
+        description="Chunks retrieved from vector search"
+    )
+    approved_chunk_ids: list[str] = Field(
+        default_factory=list,
+        description="User-approved chunk IDs"
+    )
+    awaiting_approval: bool = Field(
+        default=False,
+        description="System is waiting for user to review sources"
+    )
+    is_synthesizing: bool = Field(
+        default=False,
+        description="System is generating answer from approved sources"
+    )
+    current_query: Optional[str] = Field(
+        None,
+        description="Current user query being processed"
+    )
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "retrieved_chunks": [
+                    {
+                        "chunk_id": "abc123",
+                        "content": "Örnek içerik...",
+                        "title": "Bölüm 1",
+                        "summary": "Özet",
+                        "confidence": 0.85,
+                        "source": "document.pdf",
+                        "has_images": False
+                    }
+                ],
+                "approved_chunk_ids": [],
+                "awaiting_approval": True,
+                "is_synthesizing": False,
+                "current_query": "Tatil politikası nedir?"
+            }
+        }
+

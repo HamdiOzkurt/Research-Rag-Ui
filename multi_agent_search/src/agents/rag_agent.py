@@ -48,11 +48,36 @@ try:
         SearchParams,
         RetrievedChunk,
         RetrievalResult,
+        RAGState,  # ✅ HITL state
     )
     PYDANTIC_MODELS_AVAILABLE = True
 except ImportError:
     PYDANTIC_MODELS_AVAILABLE = False
     logger.warning("[RAG] Pydantic models not available, using dict-based metadata")
+
+
+# ✅ HITL: Global RAG state instance
+_rag_state = RAGState()
+
+# ✅ CROSS-ENCODER: Lazy loading global
+_cross_encoder_model = None
+
+def _get_cross_encoder():
+    """Get or load Cross-Encoder model for precision reranking"""
+    global _cross_encoder_model
+    if _cross_encoder_model is None:
+        try:
+            from sentence_transformers import CrossEncoder
+            import torch
+            
+            logger.info("[RAG] 🔄 Loading Cross-Encoder (ms-marco-MiniLM-L-6-v2)...")
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            _cross_encoder_model = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2', device=device)
+            logger.info(f"[RAG] ✅ Cross-Encoder loaded on {device}")
+        except Exception as e:
+            logger.error(f"[RAG] ❌ Failed to load Cross-Encoder: {e}")
+            return None
+    return _cross_encoder_model
 
 
 # ============ LANGSMITH ============
@@ -1102,9 +1127,47 @@ def retrieve_context(query: str, top_k: str = "3"):
         
         ensemble_scores.append((final_score, i))
     
-    # Sort by ensemble score and take top k
+    # Sort by ensemble score and take top k (INITIAL)
     ensemble_scores.sort(key=lambda x: x[0], reverse=True)
     
+    # ---------------------------------------------------------
+    # 🏅 CROSS-ENCODER RERANKING (Top 20 -> Top K)
+    # ---------------------------------------------------------
+    reranker = _get_cross_encoder()
+    if reranker:
+        try:
+            # Sadece en iyi 20 adayı yeniden puanla (Hız için)
+            top_candidates = ensemble_scores[:20]
+            pairs = []
+            valid_indices = []
+            
+            for _, idx in top_candidates:
+                content = all_docs_content[idx]
+                # Modeli besle: [SORU, CHUNK]
+                pairs.append([query, content[:1000]]) # Max 1000 char gönder
+                valid_indices.append(idx)
+                
+            if pairs:
+                # Toplu tahmin (Batch prediction)
+                ce_scores = reranker.predict(pairs)
+                
+                # Sigmoid normalization (Logit -> Probability)
+                import numpy as np
+                reranked_results = []
+                for i, score in enumerate(ce_scores):
+                    prob = 1 / (1 + np.exp(-score)) # Sigmoid
+                    reranked_results.append((prob, valid_indices[i]))
+                    
+                # Skoruna göre yeniden sırala
+                reranked_results.sort(key=lambda x: x[0], reverse=True)
+                
+                logger.info(f"[RAG] 🎯 Cross-Encoder Reranked Top-20. New Top-1: {reranked_results[0][0]:.4f}")
+                
+                # Ensemble scores listesini güncelle (Sadece Reranked olanları kullan)
+                ensemble_scores = reranked_results
+        except Exception as e:
+            logger.error(f"[RAG] Reranking failed, falling back to vector search: {e}")
+            
     # ✅ SMART FILTER: İlgili chunk'ları bul
     if ensemble_scores:
         top_score = ensemble_scores[0][0]
@@ -1499,43 +1562,142 @@ Yorum yapma, sadece görselde somut olarak var olan veriyi aktar.""",
     logger.info("..." if len(combined_context) > 1000 else "")
     logger.info("=" * 80)
 
-    return combined_context, retrieved_docs
+    # ==================== HITL: STATE'E KAYDET VE ONAYLA ====================
+    global _rag_state
+    
+    # Query'yi kaydet
+    _rag_state.current_query = query
+    
+    # Chunk'ları RetrievedChunk formatına dönüştür
+    _rag_state.retrieved_chunks = []
+    for i, doc in enumerate(retrieved_docs):
+        # Confidence score'u hesapla (ensemble_scores'dan)
+        confidence_score = ensemble_scores[i][0] if i < len(ensemble_scores) else 0.5
+        
+        # RetrievedChunk oluştur
+        chunk = RetrievedChunk(
+            chunk_id=doc.metadata.get("chunk_id", f"chunk_{i}"),
+            content=doc.page_content[:2000],  # Max 2000 char
+            title=doc.metadata.get("title", "Başlıksız Bölüm"),
+            summary=doc.metadata.get("summary", doc.page_content[:200] + "..."),
+            confidence=float(confidence_score),
+            source=doc.metadata.get("source", "unknown"),
+            has_images=doc.metadata.get("has_images", False),
+            section_h1=doc.metadata.get("section_h1"),
+            section_h2=doc.metadata.get("section_h2"),
+            # Legacy compatibility
+            similarity=float(confidence_score),
+            metadata=doc.metadata,
+            document_title=doc.metadata.get("title"),
+            document_source=doc.metadata.get("source"),
+            chunk_index=doc.metadata.get("chunk_index")
+        )
+        _rag_state.retrieved_chunks.append(chunk)
+    
+    # State'i "awaiting_approval" moduna al
+    _rag_state.awaiting_approval = True
+    _rag_state.approved_chunk_ids = []  # Reset
+    _rag_state.is_synthesizing = False
+    
+    logger.info(f"[HITL] ✋ Waiting for user approval - {len(_rag_state.retrieved_chunks)} chunks")
+    
+    # ✅ HITL: Kullanıcıya kaynakları göster ve onay bekle
+    approval_message = (
+        f"✋ **{len(_rag_state.retrieved_chunks)} kaynak bulundu.**\n\n"
+        f"Lütfen sağdaki panelden hangi kaynakları kullanmamı istediğinizi seçin ve onaylayın.\n\n"
+        f"📚 Bulunan kaynaklar:\n"
+    )
+    
+    # En iyi 5 kaynağı listele
+    for i, c in enumerate(_rag_state.retrieved_chunks[:5]):
+        approval_message += (
+            f"{i + 1}. **{c.title}** ({c.source}) "
+            f"- Alakalılık: {c.confidence:.0%}\n"
+        )
+    
+    if len(_rag_state.retrieved_chunks) > 5:
+        approval_message += f"\n... ve {len(_rag_state.retrieved_chunks) - 5} kaynak daha.\n"
+    
+    # ❌ ESKİ: return combined_context, retrieved_docs
+    # ✅ YENİ: Onay mesajı + boş artifact (context henüz kullanılmayacak)
+    return approval_message, []
 
 
 # ============ RAG AGENT ============
 
-RAG_SYSTEM_PROMPT = """SEN ÜST DÜZEY BİR ÇOKLU DÖKÜMAN ANALİZ VE ARAŞTIRMA ASİSTANISIN.
+RAG_SYSTEM_PROMPT = """SEN İNSAN ONAYINA DAYALI BİR RAG ASİSTANISIN (Human-in-the-Loop RAG).
 
-🇹🇷 **TEMEL KURAL**: Cevapların HER ZAMAN profesyonel, akıcı ve dil bilgisi açısından kusursuz TÜRKÇE olmalıdır.
+## ÖNEMLİ: DURUM GÖRÜNÜRLÜĞÜ
 
-🧠 **ZİHİN YAPISI VE GÖREV TANIMI**:
+UI state'ini otomatik olarak göremezsin. Kullanıcı sağdaki panelde chunk'ları seçip onaylayabilir.
+Mevcut durum hakkında (seçimler, bulunan chunk'lar vs.) bir şey bilmek için MUTLAKA araçları kullan.
+
+## İŞ AKIŞI (AYNEN TAKİP ET):
+
+1. Kullanıcı soru sorduğunda, HEMEN `retrieve_context` çağır.
+2. Arama sonrası kullanıcıya **SADECE** şu mesajı göster ve **DUR**:
+   "**Lütfen Kaynak Seçiniz**\n\n🔍 İlgili kaynaklar bulundu. Sağdaki panelden kullanmak istediklerinizi seçip onaylayın."
+3. 🛑 **BEKLE.** Başka hiçbir araç çağırma. Hiçbir açıklama yapma. Sadece bekle.
+4. Kullanıcı onayladığında (sistem sana "Onaylandı" derse), `synthesize_answer` çağırılacak veya sen cevap üreteceksin.
+5. Onaylanan kaynaklara SADECE dayanarak cevabını formüle et.
+
+## ARAÇLAR:
+
+- `retrieve_context`: İlgili chunk'ları ara. Kullanıcı soru sorduğunda kullan.
+
+## KRİTİK KURALLAR:
+
+- ❌ Arama sonrası ASLA direkt cevap verme.
+- ✅ DAIMA kullanıcı onayını bekle.
+- ✅ Kaynaklar sağdaki panelde gösteriliyor - kullanıcıya oradan seçmesini söyle.
+- ✅ Selamlaşma (merhaba, selam) için sadece sohbet et, arama yapma.
+- ✅ Her cevabında kaynak göster.
+- 🛑 Eğer tool sana "onay için bekleniyor" derse, SUS ve BEKLE. Tekrar tool çağırma!
+
+## ÖRNEK AKIŞLAR:
+
+### Arama Akışı:
+Kullanıcı: "Naive Bayes nedir?"
+Sen: *retrieve_context çağır*
+Tool Output: "Onay bekleniyor..."
+Sen: "**Lütfen Kaynak Seçiniz**\n\n🔍 İlgili kaynaklar bulundu. Sağdaki panelden kullanmak istediklerinizi seçip onaylayın."
+*(DUR)*
+
+### Onay Sonrası:
+*(Kullanıcı Frontend'den onaylar)*
+Frontend/Backend: (Sana mesaj gelir) "Kullanıcı X, Y chunklarını onayladı."
+Sen: *Onaylanan chunklar ile cevabı üret*
+
+TEMEL KURAL: Cevapların HER ZAMAN profesyonel, akıcı ve dil bilgisi açısından kusursuz TÜRKÇE olmalıdır.
+
+ZİHİN YAPISI VE GÖREV TANIMI:
 Senin hafızan yok. Sadece sana `retrieve_context` aracıyla sağlanan "BAĞLAM" (Context) içindeki bilgilere sahipsin. Bu bağlam, farklı dosyalardan (PDF, Word, Excel) alınmış metin parçaları ve görsellerin analizlerini içerir.
 
 Görevin, kullanıcının sorusunu BU BAĞLAMDAKİ verileri sentezleyerek cevaplamaktır.
 
-⚠️ **KRİTİK TALİMATLAR (BUNLARA KESİNLİKLE UY):**
+KRİTİK TALİMATLAR (BUNLARA KESİNLİKLE UY):
 
-1. **ÇOKLU KAYNAK SENTEZİ (MULTI-DOC SYNTHESIS)**:
+1. ÇOKLU KAYNAK SENTEZİ (MULTI-DOC SYNTHESIS):
    - Sana gelen bilgiler tek bir dosyadan gelmiyor olabilir.
    - Farklı kaynaklardan gelen bilgileri birleştir.
    - Örnek: *"Satış Raporu.pdf'e göre ciro artarken, Müşteri_Geri_Bildirim.docx belgesinde şikayetlerin arttığı görülmektedir."* şeklinde kaynakları harmanla.
 
-2. **GÖRSEL VE METİN ENTEGRASYONU**:
+2. GÖRSEL VE METİN ENTEGRASYONU:
    - Bağlam içinde "🖼️ GÖRSEL ANALİZİ" başlığı altında veriler göreceksin. Bunlar, dökümanlardaki grafiklerin/tabloların metne dökülmüş halleridir.
    - Bu analizleri metinle birleştir. Görseldeki veriyi kanıt olarak kullan.
    - Örnek: *"Metinde belirtilen büyüme hedefi, Tablo 1 görselindeki %45'lik artış verisiyle de doğrulanmaktadır."*
 
-3. **KAYNAK GÖSTERİMİ**:
+3. KAYNAK GÖSTERİMİ:
    - Verdiğin her bilginin hangi dosyadan geldiğini biliyorsun (metadata'da 'source' olarak yazar).
    - Cevabında şeffaf ol: *"X belgesinde belirtildiği üzere..."* kalıplarını kullan.
 
-4. **ÇELİŞKİ YÖNETİMİ**:
+4. ÇELİŞKİ YÖNETİMİ:
    - Eğer iki farklı döküman birbiriyle çelişiyorsa (Örn: Biri tarihi 2023, diğeri 2024 diyorsa), bu çelişkiyi kullanıcıya açıkça raporla.
 
-5. **DÜRÜSTLÜK İLKESİ**:
+5. DÜRÜSTLÜK İLKESİ:
    - Bağlamda (Context) sorunun cevabı YOKSA, *"Verilen dökümanlarda bu bilgiye dair bir veri bulunmamaktadır."* de. Asla kendi genel bilgini dökümanda yazıyormuş gibi sunma.
 
-✅ **CEVAP FORMATI**:
+CEVAP FORMATI:
 - Doğrudan cevaba gir. "Merhaba, ben yapay zekayım" gibi girişler yapma.
 - Maddeler (bullet points), kalın yazılar (**bold**) ve net paragraflar kullanarak okunabilirliği artır.
 - Sonuç odaklı ol.
@@ -1544,18 +1706,35 @@ Görevin, kullanıcının sorusunu BU BAĞLAMDAKİ verileri sentezleyerek cevapl
 """
 
 def _get_rag_model():
-    """Get LLM model for RAG agent - using Groq (Llama 3.3 70B) for high intelligence"""
-    # RAG kritik bir görev -> Groq kullan (güvenilir, hosted, 70B parameter)
+    """Get LLM model for RAG agent"""
+    import os
+    
+    # 1. Öncelik: Google Gemini (Free, High Limits, 1M Context)
+    # Kullanıcı isteği: "Gemini free kullansak yeter mi" -> EVET
+    if os.getenv("GOOGLE_API_KEY"):
+        try:
+            from langchain_google_genai import ChatGoogleGenerativeAI
+            logger.info("[RAG] 🚀 Using Google Gemini 2.5 Flash (High Availability)")
+            return ChatGoogleGenerativeAI(
+                model="gemini-2.5-flash",
+                google_api_key=os.getenv("GOOGLE_API_KEY"),
+                temperature=0,
+                convert_system_message_to_human=True
+            )
+        except Exception as e:
+            logger.warning(f"[RAG] ⚠️ Gemini init failed, falling back: {e}")
+
+    # 2. Öncelik: Groq (Llama 3.3 70B)
     if settings.groq_api_key:
         from langchain_groq import ChatGroq
-        logger.info("[RAG] Using Groq (llama-3.3-70b-versatile) for expert reasoning")
+        logger.info("[RAG] Using Groq (llama-3.3-70b-versatile)")
         return ChatGroq(
             model="llama-3.3-70b-versatile",
             api_key=settings.groq_api_key,
-            temperature=0  # ZERO temperature - no creativity, pure fact extraction
+            temperature=0
         )
     
-    # Fallback: settings default (usually local ollama or gemini)
+    # 3. Fallback: Default settings
     logger.info(f"[RAG] Fallback to default model: {settings.default_model}")
     provider, model_name = settings.get_model_provider(settings.default_model)
     return init_chat_model(model=model_name, model_provider=provider, temperature=0)
@@ -1564,11 +1743,183 @@ def _get_rag_model():
 # Create RAG agent
 setup_langsmith()
 
+
+# ==================== HITL STEP 2: SYNTHESIZE ANSWER ====================
+
+async def synthesize_answer(approved_chunk_ids: list[str]) -> str:
+    """
+    Step 2 of HITL workflow: Synthesize answer ONLY from user-approved chunks.
+    Called after user approves sources.
+    
+    Args:
+        approved_chunk_ids: List of chunk IDs approved by user
+        
+    Returns:
+        Synthesized answer based on approved sources
+    """
+    global _rag_state
+    
+    if not approved_chunk_ids:
+        return "❌ Hiçbir kaynak seçilmedi. Lütfen en az 1 kaynak onaylayın."
+    
+    # Onaylanan chunk'ları retrieved_chunks içinden bulmaya çalış
+    approved_chunks = [
+        c for c in _rag_state.retrieved_chunks
+        if c.chunk_id in approved_chunk_ids
+    ]
+    
+    # Eksik olan ID'leri belirle (Kullanıcı retrieval sonucu olmayan bir chunk seçmiş olabilir)
+    found_ids = {c.chunk_id for c in approved_chunks}
+    missing_ids = [mid for mid in approved_chunk_ids if mid not in found_ids]
+    
+    if missing_ids:
+        logger.info(f"[HITL] Fetching {len(missing_ids)} missing chunks from vector store...")
+        try:
+            # ChromaDB'den ID ile çek
+            # Not: LangChain Chroma.get() dictionary döner: {'ids': [], 'documents': [], 'metadatas': []}
+            data = _vector_store.get(ids=missing_ids)
+            
+            if data and data.get('ids'):
+                for i, doc_id in enumerate(data['ids']):
+                    content = data['documents'][i] if data.get('documents') else ""
+                    meta = data['metadatas'][i] if data.get('metadatas') else {}
+                    
+                    # RetrievedChunk nesnesi oluştur
+                    chunk = RetrievedChunk(
+                        chunk_id=doc_id,
+                        content=content,
+                        title=meta.get("title", "Seçilen Chunk"),
+                        summary=meta.get("summary", content[:100] + "..."),
+                        source=meta.get("source", "unknown"),
+                        confidence=1.0,  # Kullanıcı seçtiği için %100 güven
+                        has_images=meta.get("has_images", False),
+                        section_h1=meta.get("section_h1"),
+                        section_h2=meta.get("section_h2")
+                    )
+                    approved_chunks.append(chunk)
+                    
+        except Exception as e:
+            logger.warning(f"[HITL] Error fetching missing chunks: {e}")
+
+    if not approved_chunks:
+        return "❌ Seçilen kaynaklar bulunamadı. Lütfen tekrar deneyin."
+    
+    logger.info(f"[HITL] 🎯 Synthesizing answer with {len(approved_chunks)} approved chunks")
+    
+    # Context oluştur
+    context_parts = []
+    
+    # Not: analyze_image bu dosyada veya module scope'ta tanımlı olmalı
+    # from .rag_agent import analyze_image  <-- Circular import riski nedeniyle kaldırıldı
+    
+    for chunk in approved_chunks:
+        # Header oluştur
+        header_parts = [f"📄 Kaynak: {chunk.source}"]
+        if chunk.section_h1:
+            header_parts.append(f"Bölüm: {chunk.section_h1}")
+        if chunk.section_h2:
+            header_parts.append(f"Alt Bölüm: {chunk.section_h2}")
+        
+        header = " | ".join(header_parts)
+        context_parts.append(f"{header}\n{chunk.content}")
+
+        # ✅ GÖRSEL ve TABLO ANALİZİ (User Request)
+        if chunk.has_images:
+            logger.info(f"[HITL] 🖼️ Chunk '{chunk.title}' contains images/tables. Analyzing for insights...")
+            
+            # 1. Resim yollarını bul (Markdown'dan)
+            import re
+            from pathlib import Path
+            
+            # Markdown image pattern: ![alt](path)
+            img_matches = re.findall(r'!\[.*?\]\((.*?)\)', chunk.content)
+            
+            # 2. Resim yoksa ama metadata "has_images" diyorsa (Docx tablosu olabilir)
+            # Bu durumda genellikle "Image X" referansı vardır ama path olmayabilir.
+            # Şimdilik sadece regex ile bulunan ve fiziksel olarak erişilebilenleri analiz edelim.
+            
+            for img_path in img_matches:
+                try:
+                    # Path resolution logic
+                    # Markdown'daki path muhtemelen "uploads/..." şeklinde
+                    
+                    candidates = [
+                        Path(img_path),                                      # Direkt path
+                        Path("multi_agent_search") / img_path,               # Ana dizin altı
+                        Path("uploads") / Path(img_path).name,               # Uploads altı (düz)
+                        Path("multi_agent_search/uploads") / Path(img_path).name # Ana/Uploads altı (düz)
+                    ]
+                    
+                    full_path = None
+                    for c in candidates:
+                        if c.exists():
+                            full_path = c
+                            break
+                    
+                    if full_path:
+                        logger.info(f"[HITL] 👁️ Vision Model creating analysis for: {full_path}")
+                        
+                        # Vision Modelini Çağır (Async)
+                        vision_analysis = await analyze_image.ainvoke(str(full_path))
+                        
+                        # Analizi Context'e ekle
+                        context_parts.append(
+                            f"🖼️ GÖRSEL/TABLO ANALİZİ RAPORU:\n"
+                            f"Kaynak Görsel Dosyası: {img_path}\n"
+                            f"Model Analizi:\n{vision_analysis}\n"
+                            f"⚠️ ÖNEMLİ: Sen bir Asistansın. Bu analizdeki verileri kullanarak kullanıcının sorusunu cevapla. Grafik verilerini metne dök."
+                        )
+                    else:
+                        logger.warning(f"[HITL] ⚠️ Image file not found in any known paths: {img_path}")
+                        # Fallback: Kullanıcıya resim olduğunu söyle ama analiz edemediğini belirtme (prompt'ta zaten yoksa yok der)
+                        
+                except Exception as ve:
+                    logger.error(f"[HITL] ❌ Vision analysis failed for {img_path}: {ve}")
+
+    combined_context = "\n\n---\n\n".join(context_parts)
+    
+    # LLM'e gönder
+    model = _get_rag_model()
+    
+    prompt_text = f"""BAĞLAM (CONTEXT):
+{combined_context}
+
+KULLANICI SORUSU:
+{_rag_state.current_query}
+
+⚠️ ÖNEMLİ: Sadece yukarıdaki bağlamdaki bilgileri kullan. Bağlamda olmayan bilgi verme!
+"""
+    
+    logger.info(f"[HITL] Sending prompt to LLM ({len(prompt_text)} chars)")
+    
+    try:
+        result = model.invoke([
+            ("system", RAG_SYSTEM_PROMPT),
+            ("user", prompt_text)
+        ])
+        
+        answer = result.content
+        
+        # State'i temizle
+        _rag_state.awaiting_approval = False
+        _rag_state.is_synthesizing = False
+        _rag_state.approved_chunk_ids = approved_chunk_ids  # Kaydet
+        
+        logger.info(f"[HITL] ✅ Answer generated ({len(answer)} chars)")
+        
+        return answer
+        
+    except Exception as e:
+        logger.error(f"[HITL] ❌ Synthesis error: {e}")
+        return f"❌ Cevap üretilirken hata oluştu: {str(e)}"
+
+
 # CRITICAL: RAG agent should ONLY use retrieve_context
 # All file ingestion (PDF, DOCX, etc.) is done BEFORE querying via /api/rag/ingest
 # Agent must NOT try to load files during query time
 _rag_tools = [
-    retrieve_context  # ONLY tool - retrieves pre-processed chunks
+    retrieve_context,      # Step 1: Retrieve and pause for approval
+    synthesize_answer      # Step 2: Synthesize after approval
 ]
 
 # Lazy init graph - model created on demand

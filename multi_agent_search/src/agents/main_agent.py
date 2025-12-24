@@ -13,7 +13,7 @@ import logging
 import uuid
 from typing import Optional, Any, Dict
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from .deep_graph import graph as deep_graph, setup_langsmith as setup_langsmith_graph
 
@@ -73,15 +73,40 @@ async def run_research(question: str, verbose: bool = True):
     # Stream tool events as status updates (best-effort)
     try:
         async for event in deep_graph.astream_events(
-            {"messages": [("user", question)]},
+            {"messages": [HumanMessage(content=question)]},
             config=config,
             version="v2",
         ):
             ev = event.get("event")
+            
+            # Track node/chain execution
+            if ev == "on_chain_start":
+                node_name = event.get("name", "")
+                if "supervisor" in node_name.lower():
+                    yield {"status": "planning", "message": "🧠 Yönetici: Araştırma planı hazırlanıyor...", "agent": "deep"}
+                elif "researcher" in node_name.lower():
+                    yield {"status": "researching", "message": "🔬 Araştırmacı: Veri toplama başladı...", "agent": "deep"}
+                elif "clarify" in node_name.lower():
+                    yield {"status": "planning", "message": "🤔 Soru netleştiriliyor...", "agent": "deep"}
+                elif "compress" in node_name.lower():
+                    yield {"status": "writing", "message": "📝 Bulgular özetleniyor...", "agent": "deep"}
+                elif "final_report" in node_name.lower():
+                    yield {"status": "writing", "message": "📄 Nihai rapor yazılıyor...", "agent": "deep"}
+            
+            if ev == "on_chain_end":
+                node_name = event.get("name", "")
+                if "researcher" in node_name.lower():
+                    yield {"status": "researching", "message": "✅ Araştırma tamamlandı", "agent": "deep"}
 
             if ev == "on_tool_start":
                 name = (event.get("name") or "tool")
-                yield {"status": "searching", "message": f"🛠️ Tool çalışıyor: {name}", "agent": "deep"}
+                # More descriptive tool messages
+                if "tavily" in name.lower() or "search" in name.lower():
+                    yield {"status": "searching", "message": f"🌐 Web araması yapılıyor...", "agent": "deep"}
+                elif "think" in name.lower():
+                    yield {"status": "planning", "message": "💭 Strateji belirleniyor...", "agent": "deep"}
+                else:
+                    yield {"status": "searching", "message": f"🛠️ {name} çalıştırılıyor...", "agent": "deep"}
 
             if ev == "on_tool_end":
                 # If tool returned sources, forward to UI as meta.sources
@@ -93,11 +118,11 @@ async def run_research(question: str, verbose: bool = True):
                         parsed = out
                     sources = (parsed or {}).get("sources")
                     if isinstance(sources, list) and sources:
-                        yield {"meta": {"sources": sources[:20]}, "status": "searching", "message": "Kaynaklar derlendi", "agent": "deep"}
+                        yield {"meta": {"sources": sources[:20]}, "status": "searching", "message": f"📚 {len(sources)} kaynak bulundu", "agent": "deep"}
                 except Exception:
                     pass
 
-        result = await deep_graph.ainvoke({"messages": [("user", question)]}, config=config)
+        result = await deep_graph.ainvoke({"messages": [HumanMessage(content=question)]}, config=config)
         msgs = result.get("messages", []) if isinstance(result, dict) else []
         for m in reversed(msgs):
             if isinstance(m, AIMessage) and getattr(m, "content", None):
