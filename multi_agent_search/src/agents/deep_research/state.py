@@ -1,71 +1,97 @@
+"""Graph state definitions and data structures for the Deep Research agent."""
+
 import operator
-from typing import Annotated, List, Optional, TypedDict, Union
-from langchain_core.messages import AnyMessage
+from typing import Annotated, Optional, List
+
+from langchain_core.messages import MessageLikeRepresentation, AnyMessage
+from langgraph.graph import MessagesState
 from pydantic import BaseModel, Field
+from typing_extensions import TypedDict
 
-# =============================================================================
-# INPUT / OUTPUT STATES
-# =============================================================================
 
-class AgentInputState(TypedDict):
-    """Input state for the agent."""
-    messages: List[AnyMessage]
-
-class AgentState(TypedDict):
-    """Overall state of the deep research agent."""
-    messages: Annotated[List[AnyMessage], operator.add]
-    research_brief: str
-    notes: Annotated[List[str], operator.add]  # Accumulated notes from researchers
-
-# =============================================================================
-# SUPERVISOR STATE
-# =============================================================================
-
-class SupervisorState(TypedDict):
-    """State for the Research Supervisor."""
-    supervisor_messages: Annotated[List[AnyMessage], operator.add]
-    research_brief: str
-    research_iterations: int
-    notes: Annotated[List[str], operator.add]  # Passed back to main state
-
-# =============================================================================
-# RESEARCHER STATE
-# =============================================================================
-
-class ResearcherState(TypedDict):
-    """State for an individual Researcher."""
-    researcher_messages: Annotated[List[AnyMessage], operator.add]
-    research_topic: str
-    tool_call_iterations: int
-
-class ResearcherOutputState(TypedDict):
-    """Output from a researcher back to supervisor."""
-    compressed_research: str
-    raw_notes: List[str]
-
-# =============================================================================
-# STRUCTURED OUTPUT MODELS (Pydantic)
-# =============================================================================
-
-class ClarifyWithUser(BaseModel):
-    """Decision model for whether to ask the user for clarification."""
-    need_clarification: bool = Field(description="Whether clarification is needed")
-    question: str = Field(description="Clarifying question to ask, if needed")
-    verification: str = Field(description="Verification message if no clarification needed")
-
-class ResearchQuestion(BaseModel):
-    """Structured research brief generation."""
-    research_brief: str = Field(description="Detailed research brief/question")
-
+###################
+# Structured Outputs
+###################
 class ConductResearch(BaseModel):
-    """Tool to delegate a research task."""
-    research_topic: str = Field(description="Specific research topic to investigate")
+    """Call this tool to conduct research on a specific topic."""
+    research_topic: str = Field(
+        description="The topic to research. Should be a single topic, and should be described in high detail (at least a paragraph).",
+    )
 
 class ResearchComplete(BaseModel):
-    """Tool to signal research completion."""
-    reason: str = Field(description="Reason for completing research")
+    """Call this tool to indicate that the research is complete."""
+    reason: str = Field(default="Research completed", description="Reason for completing research")
 
 class Summary(BaseModel):
-    """Structured summary of a webpage."""
-    summary: str = Field(description="Concise summary of content")
-    key_excerpts: str = Field(description="Key quotes or data points")
+    """Research summary with key findings."""
+    
+    summary: str
+    key_excerpts: str
+
+class ClarifyWithUser(BaseModel):
+    """Model for user clarification requests."""
+    
+    need_clarification: bool = Field(
+        description="Whether the user needs to be asked a clarifying question.",
+    )
+    question: str = Field(
+        description="A question to ask the user to clarify the report scope",
+    )
+    verification: str = Field(
+        description="Verify message that we will start research after the user has provided the necessary information.",
+    )
+
+class ResearchQuestion(BaseModel):
+    """Research question and brief for guiding research."""
+    
+    research_brief: str = Field(
+        description="A research question that will be used to guide the research.",
+    )
+
+
+###################
+# State Definitions
+###################
+
+def override_reducer(current_value, new_value):
+    """Reducer function that allows overriding values in state."""
+    if isinstance(new_value, dict) and new_value.get("type") == "override":
+        return new_value.get("value", new_value)
+    else:
+        return operator.add(current_value, new_value)
+    
+class AgentInputState(MessagesState):
+    """InputState is only 'messages'."""
+
+class AgentState(MessagesState):
+    """Main agent state containing messages and research data."""
+    
+    supervisor_messages: Annotated[List[MessageLikeRepresentation], override_reducer]
+    research_brief: Optional[str]
+    raw_notes: Annotated[List[str], override_reducer]
+    notes: Annotated[List[str], override_reducer]
+    final_report: str
+
+class SupervisorState(TypedDict):
+    """State for the supervisor that manages research tasks."""
+    
+    supervisor_messages: Annotated[List[MessageLikeRepresentation], override_reducer]
+    research_brief: str
+    notes: Annotated[List[str], override_reducer]
+    research_iterations: int
+    raw_notes: Annotated[List[str], override_reducer]
+
+class ResearcherState(TypedDict):
+    """State for individual researchers conducting research."""
+    
+    researcher_messages: Annotated[List[MessageLikeRepresentation], operator.add]
+    tool_call_iterations: int
+    research_topic: str
+    compressed_research: str
+    raw_notes: Annotated[List[str], override_reducer]
+
+class ResearcherOutputState(TypedDict):
+    """Output state from individual researchers."""
+    
+    compressed_research: str
+    raw_notes: List[str]

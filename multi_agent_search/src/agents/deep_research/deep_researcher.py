@@ -1,4 +1,4 @@
-"""Main LangGraph implementation for the Deep Research agent."""
+"""Main LangGraph implementation for the Deep Research agent - FIXED VERSION"""
 
 import asyncio
 from typing import Literal
@@ -49,10 +49,8 @@ from .utils import (
 )
 
 # Initialize a configurable model that we will use throughout the agent
-# In our implementation, we rely on the utils/models logic to pick the right specific model (e.g. Ollama)
-# based on the configuration strings.
 configurable_model = init_chat_model(
-    configurable_fields=("model", "max_tokens", "api_key"),
+    configurable_fields=("model", "max_tokens", "api_key", "model_provider"),
 )
 
 async def clarify_with_user(state: AgentState, config: RunnableConfig) -> Command[Literal["write_research_brief", "__end__"]]:
@@ -117,18 +115,15 @@ async def write_research_brief(state: AgentState, config: RunnableConfig) -> Com
     )
     response = await research_model.ainvoke([HumanMessage(content=prompt_content)])
     
-    supervisor_system_prompt = lead_researcher_prompt.format(
-        date=get_today_str(),
-        max_concurrent_research_units=configurable.max_concurrent_research_units,
-        max_researcher_iterations=configurable.max_researcher_iterations
-    )
-    
     return Command(
         goto="research_supervisor", 
         update={
             "research_brief": response.research_brief,
-            # Initialize supervisor messages with system prompt + brief
-            "notes": [], # Reset notes
+            "notes": [],  # Reset notes
+            "supervisor_messages": {
+                "type": "override",
+                "value": []  # Will be initialized by supervisor
+            }
         }
     )
 
@@ -146,8 +141,6 @@ async def supervisor(state: SupervisorState, config: RunnableConfig) -> Command[
     # Check if supervisor_messages needs initialization
     supervisor_messages = state.get("supervisor_messages", [])
     if not supervisor_messages:
-        # Re-construct init messages if empty (should be passed from write_research_brief logically, 
-        # but LangGraph state separation might require checking)
         supervisor_system_prompt = lead_researcher_prompt.format(
             date=get_today_str(),
             max_concurrent_research_units=configurable.max_concurrent_research_units,
@@ -192,16 +185,17 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig) -> Co
     )
     
     if exceeded_allowed_iterations or no_tool_calls or research_complete_tool_call:
+        all_notes = get_notes_from_tool_calls(supervisor_messages)
         return Command(
             goto=END,
             update={
-                "notes": get_notes_from_tool_calls(supervisor_messages),
+                "notes": all_notes,
+                "raw_notes": state.get("raw_notes", []),
                 "research_brief": state.get("research_brief", "")
             }
         )
     
     all_tool_messages = []
-    # Accumulate raw notes to pass up to global state
     new_raw_notes = []
     
     # Handle think_tool
@@ -240,20 +234,19 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig) -> Co
                 name=tool_call["name"],
                 tool_call_id=tool_call["id"]
             ))
-            # Collect raw notes
             new_raw_notes.extend(observation.get("raw_notes", []))
 
     # Update state
     update_payload = {"supervisor_messages": all_tool_messages}
     if new_raw_notes:
-        update_payload["notes"] = new_raw_notes # This updates supervisor's notes, which will be synced to global notes eventually
+        update_payload["raw_notes"] = new_raw_notes
         
     return Command(
         goto="supervisor",
         update=update_payload
     ) 
 
-# SUpervisor Graph
+# Supervisor Graph
 supervisor_builder = StateGraph(SupervisorState, config_schema=Configuration)
 supervisor_builder.add_node("supervisor", supervisor)
 supervisor_builder.add_node("supervisor_tools", supervisor_tools)
@@ -302,7 +295,6 @@ async def researcher(state: ResearcherState, config: RunnableConfig) -> Command[
         }
     )
 
-# Safely execute tool wrapper
 async def execute_tool_safely(tool, args, config):
     try:
         return await tool.ainvoke(args, config)
@@ -322,7 +314,6 @@ async def researcher_tools(state: ResearcherState, config: RunnableConfig) -> Co
     tools_by_name = {t.name: t for t in tools}
     
     tool_calls = most_recent_message.tool_calls
-    # Helper to find tool instance
     def get_tool(name):
         return tools_by_name.get(name)
 
@@ -358,7 +349,6 @@ async def compress_research(state: ResearcherState, config: RunnableConfig):
     
     researcher_messages = state.get("researcher_messages", [])
     
-    # Simple compression logic
     try:
         compression_prompt = compress_research_system_prompt.format(date=get_today_str())
         messages = [SystemMessage(content=compression_prompt)] + researcher_messages + [HumanMessage(content=compress_research_simple_human_message)]
@@ -368,13 +358,12 @@ async def compress_research(state: ResearcherState, config: RunnableConfig):
     except Exception as e:
         compressed = f"Error compressing: {e}"
         
-    # Extract raw notes (all tool outputs)
+    # Extract raw notes
     raw_notes = []
     for m in researcher_messages:
         if isinstance(m, ToolMessage):
             raw_notes.append(str(m.content))
         if isinstance(m, AIMessage):
-            # Include AI thought process too? Maybe just content
             if m.content: raw_notes.append(str(m.content))
             
     return {
@@ -419,11 +408,12 @@ async def final_report_generation(state: AgentState, config: RunnableConfig):
         "messages": [final_report]
     }
 
+
 # Main Graph
 deep_researcher_builder = StateGraph(AgentState, input=AgentInputState, config_schema=Configuration)
 deep_researcher_builder.add_node("clarify_with_user", clarify_with_user)
 deep_researcher_builder.add_node("write_research_brief", write_research_brief)
-deep_researcher_builder.add_node("research_supervisor", supervisor_subgraph)
+deep_researcher_builder.add_node("research_supervisor", supervisor_subgraph)  # Use subgraph directly
 deep_researcher_builder.add_node("final_report_generation", final_report_generation)
 
 deep_researcher_builder.add_edge(START, "clarify_with_user")

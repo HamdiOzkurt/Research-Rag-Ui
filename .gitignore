@@ -112,3 +112,5 @@ Thumbs.db
 # Project specific
 *.log
 .langsmith/
+
+*.pckl
