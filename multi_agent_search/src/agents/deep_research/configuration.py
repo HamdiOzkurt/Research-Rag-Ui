@@ -45,7 +45,7 @@ class Configuration(BaseModel):
     research_model: str = Field(default="ollama:qwen2.5:3b")
     research_model_max_tokens: int = Field(default=4096)
     
-    final_report_model: str = Field(default="ollama:qwen2.5:7b")  # Bigger model for final report
+    final_report_model: str = Field(default="groq:llama-3.3-70b-versatile")  # Groq Llama 3.3 70b for high quality report
     final_report_model_max_tokens: int = Field(default=8192)
     
     # MCP server configuration
