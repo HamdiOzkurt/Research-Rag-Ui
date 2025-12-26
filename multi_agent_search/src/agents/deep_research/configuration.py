@@ -35,14 +35,15 @@ class Configuration(BaseModel):
     max_react_tool_calls: int = Field(default=6)
     
     # Model Configuration - OLLAMA ONLY (No API limits, just slower)
-    summarization_model: str = Field(default="ollama:qwen2.5:3b")
+    # Model Configuration - OLLAMA ONLY (No API limits, just slower)
+    summarization_model: str = Field(default="ollama:qwen2.5:7b")
     summarization_model_max_tokens: int = Field(default=4096)
     max_content_length: int = Field(default=4000)
     
-    compression_model: str = Field(default="ollama:qwen2.5:3b")
+    compression_model: str = Field(default="ollama:qwen2.5:7b")
     compression_model_max_tokens: int = Field(default=4096)
     
-    research_model: str = Field(default="ollama:qwen2.5:3b")
+    research_model: str = Field(default="ollama:qwen2.5:7b")
     research_model_max_tokens: int = Field(default=4096)
     
     final_report_model: str = Field(default="groq:llama-3.3-70b-versatile")  # Groq Llama 3.3 70b for high quality report

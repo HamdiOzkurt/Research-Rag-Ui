@@ -1,15 +1,49 @@
-# 🔍 AI Research Assistant
+# 🔍 AI Research Assistant & RAG System
 
-Modern AI araştırma asistanı - DeepAgents + LangGraph + Next.js
+Modern, çok ajanlı (multi-agent) araştırma asistanı ve RAG (Retrieval-Augmented Generation) sistemi. **DeepAgents**, **LangGraph** ve **Next.js** teknolojileri ile güçlendirilmiştir.
+
+---
 
 ## ⚡ Hızlı Başlangıç
 
+Projeyi çalıştırmak için backend ve frontend'i ayrı ayrı başlatmanız gerekmektedir.
+
+### 1. Backend'i Başlat (Python)
+Ana dizinde (`multi_agent_search/`):
+
 ```powershell
-cd multi_agent_search
-.\start.ps1
+# Sanal ortamı aktif et (varsa)
+.\venv\Scripts\activate
+
+# Backend sunucusunu başlat
+python -m uvicorn src.simple_copilot_backend:app --reload --port 8000
 ```
 
-Tarayıcıda aç: http://localhost:3000
+### 2. Frontend'i Başlat (Next.js)
+Yeni bir terminal açın ve:
+
+```powershell
+cd copilotkit-ui
+npm run dev
+```
+
+Tarayıcıda aç: [http://localhost:3000](http://localhost:3000)
+
+---
+
+## 🏗️ Mimari & Özellikler
+
+Bu proje iki ana yapay zeka mimarisini barındırır. Detaylı şemalar için **[ARCHITECTURE.md](ARCHITECTURE.md)** dosyasına bakınız.
+
+### 1. Deep Research (Derin Araştırma)
+Karmaşık soruları analiz eden, planlayan ve internetten güncel veri toplayarak kapsamlı raporlar oluşturan ajan yapısı.
+- **Supervisor-Worker Modeli:** Görevleri yöneten ve dağıtan hiyerarşik yapı.
+- **Hybrid LLM:** Groq (Hızlı) ve Ollama (Lokal/Sınırsız) modellerini hibrit kullanabilme yeteneği.
+
+### 2. RAG (Dokümanla Sohbet)
+PDF, DOCX vb. belgelerinizle konuşmanızı sağlayan sistem.
+- **Akıllı Parçalama (Chunking):** Metinleri ve görselleri anlamsal bütünlüğe göre böler.
+- **Hybrid Search & Re-ranking:** En alakalı cevapları bulmak için gelişmiş vektör ve anahtar kelime araması.
 
 ---
 
@@ -17,60 +51,52 @@ Tarayıcıda aç: http://localhost:3000
 
 ### Multi API Key (429 Hatası Çözümü!)
 
-`.env` dosyasına birden fazla Gemini key ekleyebilirsiniz:
+`.env` dosyasında birden fazla Gemini key tanımlayarak rate limit hatalarını aşabilirsiniz. Sistem otomatik olarak key değiştirir (rotation).
 
 ```env
 # Çoklu key (virgülle ayrılmış) - ÖNERILEN!
 GOOGLE_API_KEYS=AIzaSy-key1,AIzaSy-key2,AIzaSy-key3
 
-# Firecrawl (zorunlu)
+# Firecrawl (Web Arama için zorunlu)
 FIRECRAWL_API_KEY=fc-your-key
 
-# Model
+# Varsayılan Model
 DEFAULT_MODEL=google_genai:gemini-2.0-flash-exp
 ```
 
-**Nasıl çalışır?**
-1. İlk key rate limit'e takılırsa
-2. Otomatik olarak ikinci key'e geçer
-3. Tüm key'ler kullanıldıysa başa döner
-
-### Ollama (Sınırsız, Ücretsiz)
+### Ollama (Lokal/Sınırsız)
 
 ```bash
-# Kur
-winget install Ollama.Ollama
-
-# Model indir
+# Modeli indir
 ollama pull llama3.2
 
-# .env'de değiştir
+# .env ayarı
 DEFAULT_MODEL=ollama:llama3.2
 ```
 
 ---
 
-## 📁 Klasör Yapısı
+## 📁 Güncel Klasör Yapısı
 
 ```
 multi_agent_search/
 ├── src/
-│   ├── simple_copilot_backend.py  # FastAPI backend
+│   ├── simple_copilot_backend.py      # FastAPI backend girişi
 │   ├── agents/
-│   │   ├── simple_agent.py        # Hızlı mod
-│   │   ├── main_agent.py          # Standart mod
-│   │   └── multi_agent_system.py  # Derin araştırma
+│   │   ├── deep_research/             # Derin Araştırma Ajanı (Modüler)
+│   │   │   ├── configuration.py       # Ayarlar ve Promptlar
+│   │   │   └── graph.py               # LangGraph akışı
+│   │   ├── rag_agent.py               # RAG (Doküman) Ajanı
+│   │   ├── agentic_chunker.py         # Akıllı Doküman Parçalayıcı
+│   │   └── simple_agent.py            # Basit Chat Ajanı
 │   ├── config/
-│   │   └── settings.py            # Multi API key desteği
-│   └── models.py                  # LLM helpers
-├── copilotkit-ui/                 # Next.js frontend
+│   │   └── settings.py
+│   └── models.py
+├── copilotkit-ui/                     # Next.js Frontend
 │   └── app/
-│       ├── page.tsx               # Ana sayfa
-│       └── components/
-│           ├── ChatInterface.tsx      # Full screen chat
-│           ├── SidebarInterface.tsx   # Sidebar chat
-│           └── PopupInterface.tsx     # Popup chat
-├── start.ps1                      # PowerShell starter
+│       ├── components/                # UI Bileşenleri (Chat, Sidebar, Popup)
+│       └── page.tsx
+├── ARCHITECTURE.md                    # Mimari Şemalar ve Diyagramlar
 └── requirements.txt
 ```
 
@@ -80,96 +106,26 @@ multi_agent_search/
 
 | Mod | Açıklama |
 |-----|----------|
-| 💬 **CopilotChat** | Full screen chat |
-| 📋 **CopilotSidebar** | Dashboard + Chat sidebar |
-| 💭 **CopilotPopup** | Floating popup chat |
+| 💬 **CopilotChat** | Tam ekran chat deneyimi |
+| 📋 **CopilotSidebar** | Yanda açılan asistan paneli |
+| 💭 **CopilotPopup** | Sağ alt köşede yüzen chat balonu |
 
 ---
 
-## 🛡️ 429 Rate Limit Koruması
+## 🛡️ Performans ve Güvenlik
 
-### Özellikler
-- ✅ **Multi API Key Rotation**: Birden fazla key arasında döner
-- ✅ **Response Caching**: Aynı sorulara cache'den yanıt
-- ✅ **Rate Limiting**: Dakikada 10 istek limiti
-- ✅ **Auto Retry**: 429 hatası alınırsa otomatik key değiştirir
+- **Rate Limit Koruması:** Dakikada belirli istek sayısı ile API güvenliği.
+- **Otomatik Key Rotasyonu:** 429 hatalarında bir sonraki API anahtarına geçiş.
+- **Response Caching:** Sık sorulan sorular için önbellekten hızlı yanıt.
 
-### Cache İstatistikleri
-```
-GET http://localhost:8000/stats
-```
+### İstatistikleri Görüntüle
+Cache ve rate limit durumunu görmek için:
+`GET http://localhost:8000/stats`
 
 ---
 
-## 📊 API Endpoints
+## 🚀 Geliştirme Notları
 
-| Endpoint | Method | Açıklama |
-|----------|--------|----------|
-| `/` | GET | Health check |
-| `/chat` | POST | Chat endpoint |
-| `/health` | GET | System health |
-| `/stats` | GET | Cache & rate limit stats |
-| `/cache` | DELETE | Cache temizle |
-
-### Örnek İstek
-```bash
-curl -X POST http://localhost:8000/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Python pandas nedir?"}'
-```
-
----
-
-## 🚀 Geliştirme
-
-### Backend
-```bash
-cd multi_agent_search
-python -m uvicorn src.simple_copilot_backend:app --reload --port 8000
-```
-
-### Frontend
-```bash
-cd copilotkit-ui
-npm run dev
-```
-
----
-
-## 📦 Gereksinimler
-
-### Python
-```
-deepagents
-langgraph
-langchain
-langchain-mcp-adapters
-langchain-google-genai
-langchain-ollama
-fastapi
-uvicorn
-```
-
-### Node.js
-```
-next
-react
-tailwindcss
-```
-
----
-
-## 🎯 Yol Haritası
-
-- [x] Multi API Key Rotation
-- [x] Response Caching
-- [x] Rate Limiting
-- [x] 3 UI Modu
-- [ ] Auth (Clerk)
-- [ ] Database (Supabase)
-- [ ] Billing (Stripe)
-- [ ] Deploy (Vercel + Railway)
-
----
+Dokümantasyon veya mimari değişiklikleri için `ARCHITECTURE.md` dosyasını güncellemeyi unutmayın.
 
 **Made with ❤️ using DeepAgents, LangGraph & Next.js**

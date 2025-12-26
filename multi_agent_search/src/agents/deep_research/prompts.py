@@ -38,6 +38,12 @@ For the verification message when no clarification is needed:
 - Briefly summarize the key aspects of what you understand from their request
 - Confirm that you will now begin the research process
 - Keep the message concise and professional
+
+<Language Constraints>
+- You MUST output in the same language as the user (Primary: TURKISH).
+- ABSOLUTELY NO CHINESE CHARACTERS OR TEXT.
+- If the model tries to output Chinese, override it with Turkish.
+</Language Constraints>
 """
 
 
@@ -74,6 +80,11 @@ Guidelines:
 - For academic or scientific queries, prefer linking directly to the original paper or official journal publication rather than survey papers or secondary summaries.
 - For people, try linking directly to their LinkedIn profile, or their personal website if they have one.
 - If the query is in a specific language, prioritize sources published in that language.
+
+<Language Constraints>
+- The research question MUST be in the same language as the user's request (Primary: TURKISH).
+- ABSOLUTELY NO CHINESE CHARACTERS OR TEXT.
+</Language Constraints>
 """
 
 lead_researcher_prompt = """You are a research supervisor. Your job is to conduct research by calling the "ConductResearch" tool. For context, today's date is {date}.
@@ -133,6 +144,11 @@ After each ConductResearch tool call, use think_tool to analyze the results:
 - A separate agent will write the final report - you just need to gather information
 - When calling ConductResearch, provide complete standalone instructions - sub-agents can't see other agents' work
 - Do NOT use acronyms or abbreviations in your research questions, be very clear and specific
+
+<Language Constraints>
+- All your internal thoughts and instructions to sub-agents MUST be in the primary language of the user (mostly TURKISH).
+- ABSOLUTELY NO CHINESE CHARACTERS.
+</Language Constraints>
 </Scaling Rules>"""
 
 research_system_prompt = """You are a research assistant conducting research on the user's input topic. For context, today's date is {date}.
@@ -180,6 +196,11 @@ After each search tool call, use think_tool to analyze the results:
 - Do I have enough to answer the question comprehensively?
 - Should I search more or provide my answer?
 </Show Your Thinking>
+
+<Language Constraints>
+- Additional thoughts and research query generation MUST be in the primary language (TURKISH).
+- ABSOLUTELY NO CHINESE CHARACTERS.
+</Language Constraints>
 """
 
 
@@ -219,6 +240,11 @@ The report should be structured like this:
 </Citation Rules>
 
 Critical Reminder: It is extremely important that any information that is even remotely relevant to the user's research topic is preserved verbatim (e.g. don't rewrite it, don't summarize it, don't paraphrase it).
+
+<Language Constraints>
+- The summary/cleaned findings MUST be in the same language as the source or the user's request (TURKISH).
+- ABSOLUTELY NO CHINESE CHARACTERS.
+</Language Constraints>
 """
 
 compress_research_simple_human_message = """All above messages are about research conducted by an AI Researcher. Please clean up these findings.
@@ -235,7 +261,8 @@ For more context, here is all of the messages so far. Focus on the research brie
 {messages}
 </Messages>
 CRITICAL: Make sure the answer is written in the same language as the human messages!
-For example, if the user's messages are in English, then MAKE SURE you write your response in English. If the user's messages are in Chinese, then MAKE SURE you write your entire response in Chinese.
+If the user's messages are in Turkish, then MAKE SURE you write your response in TURKISH.
+ABSOLUTELY NO CHINESE CHARACTERS allowed. Even if the 'model' wants to speak Chinese, you must FORCE it to speak Turkish.
 This is critical. The user will only understand the answer if it is written in the same language as their input message.
 
 Today's date is {date}.
@@ -363,6 +390,11 @@ Example 2 (for a scientific article):
 ```
 
 Remember, your goal is to create a summary that can be easily understood and utilized by a downstream research agent while preserving the most critical information from the original webpage.
+
+<Language Constraints>
+- The summary MUST be in TURKISH if the content implies it or if the user is Turkish.
+- ABSOLUTELY NO CHINESE CHARACTERS.
+</Language Constraints>
 
 Today's date is {date}.
 """
