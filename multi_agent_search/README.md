@@ -1,131 +1,100 @@
-# 🔍 AI Research Assistant & RAG System
+# Deep Research & RAG Assistant
 
-Modern, çok ajanlı (multi-agent) araştırma asistanı ve RAG (Retrieval-Augmented Generation) sistemi. **DeepAgents**, **LangGraph** ve **Next.js** teknolojileri ile güçlendirilmiştir.
+An advanced multi-agent research platform designed for deep web analysis and intelligent document interaction. Built with LangGraph, Next.js, and Ollama, this system provides a unified interface for both conducting comprehensive internet research and querying internal knowledge bases.
 
----
+![Architecture Diagram](assets/architecture.png)
 
-## ⚡ Hızlı Başlangıç
+## System Capabilities
 
-Projeyi çalıştırmak için backend ve frontend'i ayrı ayrı başlatmanız gerekmektedir.
+The platform operates using two primary architectural pipelines.
 
-### 1. Backend'i Başlat (Python)
-Ana dizinde (`multi_agent_search/`):
+| Feature | Deep Research Agent | RAG (Document Chat) |
+|---------|---------------------|---------------------|
+| **Primary Function** | Autonomous deep web research and report generation | Context-aware Q&A based on uploaded documents |
+| **Model Architecture** | Supervisor-Worker hierarchical agent swarm | Hybrid Search (Vector + Keyword) with Re-ranking |
+| **Data Source** | Real-time Web (via Tavily/Firecrawl) | PDF, DOCX, TXT files (via ChromaDB) |
+| **Output** | Comprehensive, citation-backed markdown reports | Precise answers with direct references to document chunks |
+| **Key Capability** | Recursive query planning and self-correction | Evidence-based reasoning and hallucination prevention |
+
+## Technology Stack
+
+| Component | Technology | Description |
+|-----------|------------|-------------|
+| **Orchestration** | LangGraph | State management and agentic workflow coordination |
+| **Frontend** | Next.js 14 | Responsive, modern React framework with Server Actions |
+| **Backend** | FastAPI | High-performance Python API for agent communication |
+| **LLM Inference** | Ollama / Groq | Hybrid inference engine supporting local (Llama/Qwen) and cloud models |
+| **Vector DB** | ChromaDB | Local embedding storage for efficient document retrieval |
+| **Search Tools** | Tavily / Firecrawl | Optimized search APIs for LLM consumption |
+
+## Getting Started
+
+Follow these instructions to set up the environment and launch the application.
+
+### 1. Backend Setup (Python)
+
+Navigate to the project root and activate the environment.
 
 ```powershell
-# Sanal ortamı aktif et (varsa)
+# Activate virtual environment
 .\venv\Scripts\activate
 
-# Backend sunucusunu başlat
+# Install dependencies (if not already installed)
+pip install -r requirements.txt
+
+# Start the FastAPI server
 python -m uvicorn src.simple_copilot_backend:app --reload --port 8000
 ```
 
-### 2. Frontend'i Başlat (Next.js)
-Yeni bir terminal açın ve:
+### 2. Frontend Setup (Next.js)
+
+Open a new terminal window and navigate to the UI directory.
 
 ```powershell
 cd copilotkit-ui
+
+# Install Node modules
+npm install
+
+# Start the development server
 npm run dev
 ```
 
-Tarayıcıda aç: [http://localhost:3000](http://localhost:3000)
+Access the application at [http://localhost:3000](http://localhost:3000).
 
----
+## Configuration
 
-## 🏗️ Mimari & Özellikler
+The system requires environmental variables to be set in the `.env` file.
 
-Bu proje iki ana yapay zeka mimarisini barındırır. Detaylı şemalar için **[ARCHITECTURE.md](ARCHITECTURE.md)** dosyasına bakınız.
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `GOOGLE_API_KEYS` | List of Gemini API keys for rotation (prevents 429 errors) | `key1,key2,key3` |
+| `FIRECRAWL_API_KEY` | Required for the web search capability | `fc-your-key` |
+| `DEFAULT_MODEL` | Primary model for general tasks | `ollama:qwen2.5:7b` |
+| `TAVILY_API_KEY` | Alternative search provider key | `tvly-your-key` |
 
-### 1. Deep Research (Derin Araştırma)
-Karmaşık soruları analiz eden, planlayan ve internetten güncel veri toplayarak kapsamlı raporlar oluşturan ajan yapısı.
-- **Supervisor-Worker Modeli:** Görevleri yöneten ve dağıtan hiyerarşik yapı.
-- **Hybrid LLM:** Groq (Hızlı) ve Ollama (Lokal/Sınırsız) modellerini hibrit kullanabilme yeteneği.
-
-### 2. RAG (Dokümanla Sohbet)
-PDF, DOCX vb. belgelerinizle konuşmanızı sağlayan sistem.
-- **Akıllı Parçalama (Chunking):** Metinleri ve görselleri anlamsal bütünlüğe göre böler.
-- **Hybrid Search & Re-ranking:** En alakalı cevapları bulmak için gelişmiş vektör ve anahtar kelime araması.
-
----
-
-## 🔑 API Key Ayarları
-
-### Multi API Key (429 Hatası Çözümü!)
-
-`.env` dosyasında birden fazla Gemini key tanımlayarak rate limit hatalarını aşabilirsiniz. Sistem otomatik olarak key değiştirir (rotation).
-
-```env
-# Çoklu key (virgülle ayrılmış) - ÖNERILEN!
-GOOGLE_API_KEYS=AIzaSy-key1,AIzaSy-key2,AIzaSy-key3
-
-# Firecrawl (Web Arama için zorunlu)
-FIRECRAWL_API_KEY=fc-your-key
-
-# Varsayılan Model
-DEFAULT_MODEL=google_genai:gemini-2.0-flash-exp
-```
-
-### Ollama (Lokal/Sınırsız)
-
-```bash
-# Modeli indir
-ollama pull llama3.2
-
-# .env ayarı
-DEFAULT_MODEL=ollama:llama3.2
-```
-
----
-
-## 📁 Güncel Klasör Yapısı
+## Project Structure
 
 ```
 multi_agent_search/
 ├── src/
-│   ├── simple_copilot_backend.py      # FastAPI backend girişi
+│   ├── simple_copilot_backend.py      # Main API Entry point
 │   ├── agents/
-│   │   ├── deep_research/             # Derin Araştırma Ajanı (Modüler)
-│   │   │   ├── configuration.py       # Ayarlar ve Promptlar
-│   │   │   └── graph.py               # LangGraph akışı
-│   │   ├── rag_agent.py               # RAG (Doküman) Ajanı
-│   │   ├── agentic_chunker.py         # Akıllı Doküman Parçalayıcı
-│   │   └── simple_agent.py            # Basit Chat Ajanı
-│   ├── config/
-│   │   └── settings.py
-│   └── models.py
-├── copilotkit-ui/                     # Next.js Frontend
-│   └── app/
-│       ├── components/                # UI Bileşenleri (Chat, Sidebar, Popup)
-│       └── page.tsx
-├── ARCHITECTURE.md                    # Mimari Şemalar ve Diyagramlar
-└── requirements.txt
+│   │   ├── deep_research/             # Deep Research Agent Logic
+│   │   │   ├── deep_researcher.py     # Supervisor Agent Implementation
+│   │   │   └── graph.py               # Workflow Graph Definition
+│   │   ├── rag_agent.py               # RAG Agent Implementation
+│   │   └── agentic_chunker.py         # Advanced Document Processor
+│   └── config/
+│       └── settings.py                # Global Configuration
+├── copilotkit-ui/                     # Next.js Frontend Source
+│   ├── app/
+│   │   ├── components/                # React Components
+│   │   └── page.tsx                   # Main Entry Page
+├── assets/                            # Static Assets and Diagrams
+└── requirements.txt                   # Python Dependencies
 ```
 
----
+## License
 
-## 🎨 UI Modları
-
-| Mod | Açıklama |
-|-----|----------|
-| 💬 **CopilotChat** | Tam ekran chat deneyimi |
-| 📋 **CopilotSidebar** | Yanda açılan asistan paneli |
-| 💭 **CopilotPopup** | Sağ alt köşede yüzen chat balonu |
-
----
-
-## 🛡️ Performans ve Güvenlik
-
-- **Rate Limit Koruması:** Dakikada belirli istek sayısı ile API güvenliği.
-- **Otomatik Key Rotasyonu:** 429 hatalarında bir sonraki API anahtarına geçiş.
-- **Response Caching:** Sık sorulan sorular için önbellekten hızlı yanıt.
-
-### İstatistikleri Görüntüle
-Cache ve rate limit durumunu görmek için:
-`GET http://localhost:8000/stats`
-
----
-
-## 🚀 Geliştirme Notları
-
-Dokümantasyon veya mimari değişiklikleri için `ARCHITECTURE.md` dosyasını güncellemeyi unutmayın.
-
-**Made with ❤️ using DeepAgents, LangGraph & Next.js**
+This project is open-source and available under the MIT License.
