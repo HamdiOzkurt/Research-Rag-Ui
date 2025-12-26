@@ -1,175 +1,100 @@
-# 🔍 AI Research Assistant
+# Deep Research & RAG Assistant
 
-Modern AI araştırma asistanı - DeepAgents + LangGraph + Next.js
+An advanced multi-agent research platform designed for deep web analysis and intelligent document interaction. Built with LangGraph, Next.js, and Ollama, this system provides a unified interface for both conducting comprehensive internet research and querying internal knowledge bases.
 
-## ⚡ Hızlı Başlangıç
+![Architecture Diagram](assets/architecture.png)
+
+## System Capabilities
+
+The platform operates using two primary architectural pipelines.
+
+| Feature | Deep Research Agent | RAG (Document Chat) |
+|---------|---------------------|---------------------|
+| **Primary Function** | Autonomous deep web research and report generation | Context-aware Q&A based on uploaded documents |
+| **Model Architecture** | Supervisor-Worker hierarchical agent swarm | Hybrid Search (Vector + Keyword) with Re-ranking |
+| **Data Source** | Real-time Web (via Tavily/Firecrawl) | PDF, DOCX, TXT files (via ChromaDB) |
+| **Output** | Comprehensive, citation-backed markdown reports | Precise answers with direct references to document chunks |
+| **Key Capability** | Recursive query planning and self-correction | Evidence-based reasoning and hallucination prevention |
+
+## Technology Stack
+
+| Component | Technology | Description |
+|-----------|------------|-------------|
+| **Orchestration** | LangGraph | State management and agentic workflow coordination |
+| **Frontend** | Next.js 14 | Responsive, modern React framework with Server Actions |
+| **Backend** | FastAPI | High-performance Python API for agent communication |
+| **LLM Inference** | Ollama / Groq | Hybrid inference engine supporting local (Llama/Qwen) and cloud models |
+| **Vector DB** | ChromaDB | Local embedding storage for efficient document retrieval |
+| **Search Tools** | Tavily / Firecrawl | Optimized search APIs for LLM consumption |
+
+## Getting Started
+
+Follow these instructions to set up the environment and launch the application.
+
+### 1. Backend Setup (Python)
+
+Navigate to the project root and activate the environment.
 
 ```powershell
-cd multi_agent_search
-.\start.ps1
+# Activate virtual environment
+.\venv\Scripts\activate
+
+# Install dependencies (if not already installed)
+pip install -r requirements.txt
+
+# Start the FastAPI server
+python -m uvicorn src.simple_copilot_backend:app --reload --port 8000
 ```
 
-Tarayıcıda aç: http://localhost:3000
+### 2. Frontend Setup (Next.js)
 
----
+Open a new terminal window and navigate to the UI directory.
 
-## 🔑 API Key Ayarları
+```powershell
+cd copilotkit-ui
 
-### Multi API Key (429 Hatası Çözümü!)
+# Install Node modules
+npm install
 
-`.env` dosyasına birden fazla Gemini key ekleyebilirsiniz:
-
-```env
-# Çoklu key (virgülle ayrılmış) - ÖNERILEN!
-GOOGLE_API_KEYS=AIzaSy-key1,AIzaSy-key2,AIzaSy-key3
-
-# Firecrawl (zorunlu)
-FIRECRAWL_API_KEY=fc-your-key
-
-# Model
-DEFAULT_MODEL=google_genai:gemini-2.0-flash-exp
+# Start the development server
+npm run dev
 ```
 
-**Nasıl çalışır?**
-1. İlk key rate limit'e takılırsa
-2. Otomatik olarak ikinci key'e geçer
-3. Tüm key'ler kullanıldıysa başa döner
+Access the application at [http://localhost:3000](http://localhost:3000).
 
-### Ollama (Sınırsız, Ücretsiz)
+## Configuration
 
-```bash
-# Kur
-winget install Ollama.Ollama
+The system requires environmental variables to be set in the `.env` file.
 
-# Model indir
-ollama pull llama3.2
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `GOOGLE_API_KEYS` | List of Gemini API keys for rotation (prevents 429 errors) | `key1,key2,key3` |
+| `FIRECRAWL_API_KEY` | Required for the web search capability | `fc-your-key` |
+| `DEFAULT_MODEL` | Primary model for general tasks | `ollama:qwen2.5:7b` |
+| `TAVILY_API_KEY` | Alternative search provider key | `tvly-your-key` |
 
-# .env'de değiştir
-DEFAULT_MODEL=ollama:llama3.2
-```
-
----
-
-## 📁 Klasör Yapısı
+## Project Structure
 
 ```
 multi_agent_search/
 ├── src/
-│   ├── simple_copilot_backend.py  # FastAPI backend
+│   ├── simple_copilot_backend.py      # Main API Entry point
 │   ├── agents/
-│   │   ├── simple_agent.py        # Hızlı mod
-│   │   ├── main_agent.py          # Standart mod
-│   │   └── multi_agent_system.py  # Derin araştırma
-│   ├── config/
-│   │   └── settings.py            # Multi API key desteği
-│   └── models.py                  # LLM helpers
-├── copilotkit-ui/                 # Next.js frontend
-│   └── app/
-│       ├── page.tsx               # Ana sayfa
-│       └── components/
-│           ├── ChatInterface.tsx      # Full screen chat
-│           ├── SidebarInterface.tsx   # Sidebar chat
-│           └── PopupInterface.tsx     # Popup chat
-├── start.ps1                      # PowerShell starter
-└── requirements.txt
+│   │   ├── deep_research/             # Deep Research Agent Logic
+│   │   │   ├── deep_researcher.py     # Supervisor Agent Implementation
+│   │   │   └── graph.py               # Workflow Graph Definition
+│   │   ├── rag_agent.py               # RAG Agent Implementation
+│   │   └── agentic_chunker.py         # Advanced Document Processor
+│   └── config/
+│       └── settings.py                # Global Configuration
+├── copilotkit-ui/                     # Next.js Frontend Source
+│   ├── app/
+│   │   ├── components/                # React Components
+│   │   └── page.tsx                   # Main Entry Page
+├── assets/                            # Static Assets and Diagrams
+└── requirements.txt                   # Python Dependencies
 ```
 
----
+## License
 
-## 🎨 UI Modları
-
-| Mod | Açıklama |
-|-----|----------|
-| 💬 **CopilotChat** | Full screen chat |
-| 📋 **CopilotSidebar** | Dashboard + Chat sidebar |
-| 💭 **CopilotPopup** | Floating popup chat |
-
----
-
-## 🛡️ 429 Rate Limit Koruması
-
-### Özellikler
-- ✅ **Multi API Key Rotation**: Birden fazla key arasında döner
-- ✅ **Response Caching**: Aynı sorulara cache'den yanıt
-- ✅ **Rate Limiting**: Dakikada 10 istek limiti
-- ✅ **Auto Retry**: 429 hatası alınırsa otomatik key değiştirir
-
-### Cache İstatistikleri
-```
-GET http://localhost:8000/stats
-```
-
----
-
-## 📊 API Endpoints
-
-| Endpoint | Method | Açıklama |
-|----------|--------|----------|
-| `/` | GET | Health check |
-| `/chat` | POST | Chat endpoint |
-| `/health` | GET | System health |
-| `/stats` | GET | Cache & rate limit stats |
-| `/cache` | DELETE | Cache temizle |
-
-### Örnek İstek
-```bash
-curl -X POST http://localhost:8000/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Python pandas nedir?"}'
-```
-
----
-
-## 🚀 Geliştirme
-
-### Backend
-```bash
-cd multi_agent_search
-python -m uvicorn src.simple_copilot_backend:app --reload --port 8000
-```
-
-### Frontend
-```bash
-cd copilotkit-ui
-npm run dev
-```
-
----
-
-## 📦 Gereksinimler
-
-### Python
-```
-deepagents
-langgraph
-langchain
-langchain-mcp-adapters
-langchain-google-genai
-langchain-ollama
-fastapi
-uvicorn
-```
-
-### Node.js
-```
-next
-react
-tailwindcss
-```
-
----
-
-## 🎯 Yol Haritası
-
-- [x] Multi API Key Rotation
-- [x] Response Caching
-- [x] Rate Limiting
-- [x] 3 UI Modu
-- [ ] Auth (Clerk)
-- [ ] Database (Supabase)
-- [ ] Billing (Stripe)
-- [ ] Deploy (Vercel + Railway)
-
----
-
-**Made with ❤️ using DeepAgents, LangGraph & Next.js**
+This project is open-source and available under the MIT License.
