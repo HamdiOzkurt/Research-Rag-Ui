@@ -2,7 +2,7 @@
 
 An advanced multi-agent research platform designed for deep web analysis and intelligent document interaction. Built with LangGraph, Next.js, and Ollama, this system provides a unified interface for both conducting comprehensive internet research and querying internal knowledge bases.
 
-![Architecture Diagram](assets/architecture.png)
+![Architecture Diagram](https://github.com/HamdiOzkurt/Research-Rag-UI/blob/main/multi_agent_search/assets/architecture.png?raw=true)
 
 ## System Capabilities
 
